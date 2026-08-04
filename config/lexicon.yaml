@@ -1,0 +1,148 @@
+# Lexico de identificacao de documentos de concepcao (ConOps).
+#
+# Reaproveitado integralmente na Etapa 3 (filtragem lexica sobre o texto completo)
+# e como base do prompt da Etapa 5 (classificacao por LLM). Alterar aqui propaga.
+#
+# Normalizacao aplicada antes do casamento (ver prefilter.py):
+#   minusculas, NFKD sem diacriticos, pontuacao -> espaco, espacos colapsados.
+# Portanto "CON OPS", "Con-Ops" e "con ops" casam com o padrao "con ops".
+
+version: 1
+
+# --- SINAL FORTE -------------------------------------------------------------
+# Nomes institucionais do artefato. No TITULO -> faixa `strong` (baixar sempre).
+# Em abstract/subject -> contribui para `weak`.
+strong_terms:
+  - concept of operations
+  - concepts of operations
+  - conops
+  - con ops
+  - operational concept
+  - operational concepts
+  - operations concept
+  - operations concepts
+  - opscon
+  - ops con
+  - operational concept description
+  - concept of employment
+  - conemp
+  - mission concept
+  - mission operations concept
+  - science operations concept
+  - system operational description
+  - operational concept document
+  - concept of use
+  - conuse
+
+# Sinal moderado: sugerem conteudo de concepcao sem nomear o artefato.
+# Nunca elevam sozinhos para `strong`; somam pontos para `weak`.
+moderate_terms:
+  - operational scenario
+  - operational scenarios
+  - operational view
+  - ov-1
+  - high level operational concept graphic
+  - operational architecture
+  - mission architecture
+  - system of interest
+  - stakeholder needs
+  - operational need
+  - modes of operation
+  - operational environment
+
+# --- ASSINATURA ESTRUTURAL ---------------------------------------------------
+# Titulos de secao canonicos da ISO/IEC/IEEE 29148:2011 (clausula ConOps) e da
+# ANSI/AIAA G-043A-2012. Sao sinal muito mais especifico que o termo isolado:
+# raramente aparecem juntos fora de um documento de concepcao de verdade.
+#
+# Uso na Etapa 1: casam contra abstract (poucos acertos, alta precisao).
+# Uso na Etapa 3: casam contra o texto completo — e la que rendem de fato.
+structural_signature:
+  - current system or situation
+  - justification for and nature of changes
+  - justification for change
+  - concepts for the proposed system
+  - description of the proposed system
+  - operational scenarios
+  - summary of impacts
+  - operational impacts
+  - organizational impacts
+  - impacts during development
+  - analysis of the proposed system
+  - advantages and limitations
+  - alternatives and trade-offs
+  - operational environment
+  - support environment
+  - modes of operation
+  - user classes and other involved personnel
+  - operational policies and constraints
+
+# --- NEGATIVOS ADVERSARIAIS --------------------------------------------------
+# Contem sinal forte mas NAO sao documentos de concepcao. Rebaixam a faixa de
+# `strong` para `weak` e sao marcados para revisao manual. Sao os negativos mais
+# informativos do conjunto de validacao (secao 3.3 do plano).
+adversarial_markers:
+  - review checklist
+  - checklist for
+  - lessons learned
+  - meeting minutes
+  - minutes of
+  - agenda
+  - presentation slides
+  - viewgraph
+  - status report
+  - progress report
+  - quarterly report
+  - annual report
+  - bibliography
+  - literature review
+  - trip report
+  - press release
+  - call for papers
+  - workshop announcement
+  - table of contents
+  - errata
+  - dissemination plan
+  - data management plan
+  - training syllabus
+  - course outline
+
+# --- VOCABULARIO DE SAFETY / STPA -------------------------------------------
+# Nao indica ConOps. Serve para (a) identificar os *hard negatives* do acervo
+# PSAS e (b) alimentar o dicionario da Etapa 3.
+safety_terms:
+  - stpa
+  - stamp
+  - system theoretic process analysis
+  - systems theoretic accident model
+  - hazard analysis
+  - safety control structure
+  - unsafe control action
+  - loss scenario
+  - functional hazard assessment
+  - fault tree
+  - fmea
+  - safety case
+  - system safety
+
+# --- PESOS E LIMIARES --------------------------------------------------------
+scoring:
+  weight_strong_title: 10.0
+  weight_strong_body: 3.0        # abstract / subject terms
+  weight_moderate_title: 2.0
+  weight_moderate_body: 0.5
+  weight_structural: 4.0         # por secao canonica distinta encontrada
+  penalty_adversarial_title: -6.0
+  penalty_adversarial_body: -1.5
+
+thresholds:
+  # strong: sinal forte no titulo e sem marcador adversarial no titulo.
+  strong_min_score: 10.0
+  # weak: qualquer sinal relevante fora do titulo, ou strong rebaixado.
+  weak_min_score: 2.5
+
+# Amostragem da classe negativa (sem a qual nao ha como medir precisao/recall
+# na Etapa 5). Numeros por fonte, aplicados na descoberta.
+negative_sampling:
+  per_source_cap: 400
+  seed: 20260804

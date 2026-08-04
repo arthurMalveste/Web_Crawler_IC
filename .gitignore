@@ -1,0 +1,17 @@
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# O corpus vive em data_root (config/domains.yaml), fora do repositorio.
+# Estas entradas cobrem o caso de alguem apontar data_root para ca por engano.
+data/
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+manifest.jsonl
+rejects.jsonl
+
+# Metricas datadas sao versionadas de proposito (reprodutibilidade);
+# arquivos de trabalho, nao.
+reports/*.tmp

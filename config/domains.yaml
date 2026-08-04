@@ -1,0 +1,75 @@
+# Politica de fetch. Um unico downloader, parametros por dominio.
+#
+# `rate` = segundos MINIMOS entre requisicoes ao dominio (nao req/s).
+# Valores derivados de limites publicados ou medidos, nao chutados.
+
+# Raiz do corpus. Fora do OneDrive de proposito: o acervo chega a dezenas de GB
+# e a sincronizacao trava o cliente e gera conflitos de arquivo.
+data_root: "C:/ConOpsCorpus"
+
+defaults:
+  timeout_s: 60          # por operacao de leitura (httpx)
+  max_download_s: 300    # relogio de parede do corpo inteiro; pega servidor lento
+  max_file_mb: 60
+  retries: 5
+  backoff_base_s: 2.0
+  backoff_max_s: 120.0
+  respect_robots: true
+  concurrency: 1
+  rate: 2.0
+  # Identificacao obrigatoria. TROCAR o e-mail pelo institucional antes da
+  # primeira coleta em escala — e o que distingue um bot academico tolerado de
+  # um bot anonimo bloqueado.
+  user_agent: "UNICAMP-FT-ConOpsBot/0.1 (Iniciacao Cientifica STPA; +mailto:CONTATO@unicamp.br)"
+
+domains:
+  # 500 req / 15 min medido nos headers X-RateLimit-* -> 1.8 s/req.
+  # 2.0 s da margem. O fetcher ainda le os headers e se auto-ajusta.
+  ntrs.nasa.gov:
+    rate: 2.0
+    concurrency: 2
+    respect_robots: true
+
+  # Sem limite publicado; OAI-PMH e barato. 1 s/req e conservador.
+  rosap.ntl.bts.gov:
+    rate: 1.0
+    concurrency: 2
+
+  # Sem limite publicado nos bulk dumps; sao poucos arquivos grandes.
+  data.europa.eu:
+    rate: 1.0
+    concurrency: 1
+  cordis.europa.eu:
+    rate: 2.0
+    concurrency: 1
+
+  # Sitemap autorizado explicitamente pela DTIC, mas o dominio filtra por
+  # User-Agent (403 para UA identificado, 307 para UA de navegador).
+  # Em 2026-08-04 o host inteiro redireciona para /landingpage/maint.html.
+  apps.dtic.mil:
+    rate: 3.0
+    concurrency: 1
+    browser_ua: true
+    playwright_fallback: true
+
+  cosmos.esa.int:
+    rate: 2.0
+    concurrency: 1
+    max_depth: 3
+
+  psas.scripts.mit.edu:
+    rate: 1.0
+    concurrency: 1
+
+  sunnyday.mit.edu:
+    rate: 1.0
+    concurrency: 1
+
+# Dominios que o coletor NUNCA acessa, mesmo que apareca link.
+# Nao e otimizacao: e restricao juridica/etica registrada no relatorio.
+blocklist:
+  # Content Server da ESA: exige autenticacao. Nao tentar.
+  - dms.cosmos.esa.int
+  # Exige CAC/PIV. Nao tentar.
+  - rndgateway.dtic.mil
+  - discover.dtic.mil.s3
