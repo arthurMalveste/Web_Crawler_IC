@@ -29,7 +29,14 @@ from .frontier import (
     Frontier,
 )
 from .prefilter import Lexicon, NegativeSampler
-from .record import TIER_NEGATIVE, TIER_STRONG, TIER_WEAK, DocumentRecord, utcnow_iso
+from .record import (
+    TIER_HARD_NEGATIVE,
+    TIER_NEGATIVE,
+    TIER_STRONG,
+    TIER_WEAK,
+    DocumentRecord,
+    utcnow_iso,
+)
 from .store import Store, count_pdf_pages
 
 log = structlog.get_logger(__name__)
@@ -100,6 +107,10 @@ class Pipeline:
         run_id = f"{adapter.name}-discover-{uuid.uuid4().hex[:8]}"
         self.frontier.start_run(run_id, adapter.name, {"limit": limit, "fase": "discover"})
         st = DiscoveryStats()
+        # Fontes de negativos dificeis (PSAS) sao coletadas por inteiro: elas
+        # existem exatamente para isso, e amostrar 1 em 8 descartaria o material
+        # mais informativo que o projeto tem para validar a Etapa 5.
+        tudo_negativo = getattr(adapter, "collect_all_negatives", False)
 
         for rec in adapter.discover():
             st.vistos += 1
@@ -117,9 +128,11 @@ class Pipeline:
             self.lexicon.score_record(rec)
 
             if rec.tier == TIER_NEGATIVE:
-                # Amostrar a classe negativa e obrigatorio: sem ela nao ha
-                # precisao/recall/F1 para avaliar a Etapa 5.
-                if not (self.collect_negatives and self.sampler.accept(rec)):
+                if tudo_negativo:
+                    rec.tier = TIER_HARD_NEGATIVE
+                elif not (self.collect_negatives and self.sampler.accept(rec)):
+                    # Amostrar a classe negativa e obrigatorio: sem ela nao ha
+                    # precisao/recall/F1 para avaliar a Etapa 5.
                     st.por_faixa["descartado"] = st.por_faixa.get("descartado", 0) + 1
                     continue
 

@@ -43,14 +43,38 @@ domains:
     rate: 2.0
     concurrency: 1
 
-  # Sitemap autorizado explicitamente pela DTIC, mas o dominio filtra por
-  # User-Agent (403 para UA identificado, 307 para UA de navegador).
-  # Em 2026-08-04 o host inteiro redireciona para /landingpage/maint.html.
+  # ---------------------------------------------------------------------
+  # EXCECAO DE USER-AGENT — decisao do projeto, registrada no relatorio.
+  #
+  # Os dois dominios abaixo estao atras de WAF (Akamai) e respondem 403 a
+  # qualquer UA que nao seja exatamente o de um navegador. Testado em
+  # 2026-08-04: o UA identificado toma 403, e um UA hibrido (navegador +
+  # contato academico) TAMBEM toma 403 — nao ha meio-termo tecnico.
+  # Na FAA, o proprio /robots.txt responde 403: a politica de rastreamento do
+  # site e inacessivel ao cliente que a consultaria.
+  #
+  # Justificativa da excecao: sao documentos publicos de governo, publicados
+  # para acesso publico; a regra do WAF e mitigacao generica de bots, nao
+  # politica declarada da instituicao; e a taxa aqui e de 1 requisicao a cada
+  # 3-4 s, sem qualquer carga relevante para o servidor.
+  #
+  # A excecao e restrita a estes dois hosts. Todo o resto do projeto continua
+  # usando o UA identificado com contato institucional.
+  # ---------------------------------------------------------------------
   apps.dtic.mil:
     rate: 3.0
     concurrency: 1
     browser_ua: true
     playwright_fallback: true
+
+  www.faa.gov:
+    rate: 4.0          # mais conservador: e o dominio de maior volume potencial
+    concurrency: 1
+    browser_ua: true
+  faa.gov:
+    rate: 4.0
+    concurrency: 1
+    browser_ua: true
 
   cosmos.esa.int:
     rate: 2.0

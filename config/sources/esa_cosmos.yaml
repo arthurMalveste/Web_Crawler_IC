@@ -1,0 +1,44 @@
+# ESA Cosmos — portal Liferay das missoes cientificas.
+#
+# VALOR: missoes cientificas da ESA publicam "Science Operations Concept" e
+# "Mission Operations Concept" (Euclid, PLATO, JUICE, Solar Orbiter) — sao
+# ConOps legitimos e de fonte europeia, o que ajuda a diversidade do corpus.
+#
+# LIMITE: a documentacao de projeto propriamente dita fica no Content Server
+# (dms.cosmos.esa.int, ex-Livelink), que NAO e publicamente acessivel e exige
+# autenticacao. Esse host esta na blocklist global (config/domains.yaml) — nao
+# se tenta acesso, por decisao registrada no relatorio. Publico e coletavel e
+# apenas o que esta no Liferay Documents & Media, espalhado pelas paginas de
+# missao.
+
+name: esa_cosmos
+kind: crawl
+strategy: focused
+
+seeds:
+  - https://www.cosmos.esa.int/browse-all-missions
+  - https://www.cosmos.esa.int/web/euclid
+  - https://www.cosmos.esa.int/web/plato
+  - https://www.cosmos.esa.int/web/juice
+  - https://www.cosmos.esa.int/web/solar-orbiter
+
+scope:
+  allow_hosts:
+    - cosmos.esa.int
+  deny_paths:
+    - '/web/guest/login'
+    - '/c/portal/login'
+    - '/user/'
+    - '/group/'
+  max_depth: 3
+  max_pages: 500
+
+sitemap: auto
+render: false
+
+notes: >
+  As URLs do Liferay carregam uuid + "?t=<timestamp>" e MUDAM quando o
+  documento e reeditado. Por isso URL nunca e chave de identidade — a
+  identidade do conteudo e o SHA-256 (core/store.py). O "?t=" tambem nao pode
+  ser removido na canonicalizacao: sem ele o servidor recusa o download
+  (tratado em core/record.py::canonical_url).

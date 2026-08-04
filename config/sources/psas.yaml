@@ -1,0 +1,59 @@
+# MIT PSAS/PSASS — acervo do workshop STAMP.
+#
+# PAPEL NO CORPUS — diferente de todas as outras fontes: o PSAS NAO contem
+# ConOps. Contem apresentacoes SOBRE STPA. Entra por dois motivos:
+#
+#   1. Corpus de vocabulario para o dicionario lexico da Etapa 3.
+#   2. HARD NEGATIVES — documentos densos em terminologia de seguranca de
+#      sistemas que nao sao documentos de concepcao. Se o classificador da
+#      Etapa 5 acertar estes, esta aprendendo o padrao ConOps de verdade, e nao
+#      apenas detectando jargao de safety. E um dos conjuntos mais valiosos
+#      para a validacao.
+#
+# Verificado em 2026-08-04: WordPress, HTML renderizado no servidor, sem JS.
+# A pagina de apresentacoes traz 538 links de arquivo em UMA requisicao — os
+# filtros por industria sao client-side sobre o DOM ja entregue.
+
+name: psas
+kind: crawl
+strategy: focused
+
+# Desliga a amostragem da classe negativa: coleta-se o acervo INTEIRO. Numa
+# fonte que existe para fornecer negativos dificeis, amostrar 1 em 8
+# descartaria justamente o material mais informativo da validacao.
+role: hard_negatives
+
+seeds:
+  - https://psas.scripts.mit.edu/home/mit-stamp-workshop-presentations/
+  - https://psas.scripts.mit.edu/home/publications/
+  - https://psas.scripts.mit.edu/home/books-and-handbooks/
+  - https://psas.scripts.mit.edu/home/materials/
+  - http://sunnyday.mit.edu/safer-world/
+
+# 1.3 MB de HTML numa pagina so; o acervo inteiro sai com profundidade rasa.
+scope:
+  allow_hosts:
+    - psas.scripts.mit.edu
+    - sunnyday.mit.edu
+  deny_paths:
+    - /wp-admin
+    - /wp-login
+    - /feed
+    - '\?replytocom='
+  max_depth: 2
+  max_pages: 120
+  same_host_only: false   # sunnyday.mit.edu e host distinto e legitimo
+
+document_extensions: ['.pdf', '.ppt', '.pptx', '.doc', '.docx']
+
+# WordPress deste site nao publica sitemap util.
+sitemap: none
+render: false
+
+notes: >
+  Armadilha real de URL: nomes de arquivo com espacos
+  ("[STAMP Mar26] STPA Practice.pdf") e nao-ASCII ("Andrej_Lalis__PUB.pdf").
+  O escape esta em engine/extract.py::_quote_path e a normalizacao do nome em
+  disco vem do enderecamento por conteudo (SHA-256).
+  Direitos: material de workshop, direitos dos autores. Uso interno de
+  pesquisa; nao redistribuir.

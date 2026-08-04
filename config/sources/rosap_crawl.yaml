@@ -1,0 +1,52 @@
+# ROSA P por rastreamento HTML — fonte de EXPERIMENTO, nao de producao.
+#
+# Esta e a mesma fonte que o adaptador OAI-PMH (adapters/rosap.py) ja coleta.
+# Existe em duas versoes de proposito: e o unico jeito honesto de medir as duas
+# afirmacoes centrais do trabalho na MESMA fonte, com o MESMO acervo.
+#
+#   1. "Onde ha interface estruturada, ela e preferivel."
+#      Comparavel: registros obtidos por requisicao, OAI-PMH vs. rastreamento.
+#
+#   2. "Pontuar links antes de segui-los melhora a coleta."
+#      Comparavel: harvest_rate do focado vs. BFS, orcamento identico.
+#      -> python -m crawler.cli experiment rosap_crawl --max-pages 60
+#
+# Sem esse par, as duas afirmacoes seriam so argumento de arquitetura. Com ele,
+# viram numero reportavel.
+#
+# O acervo e dominio publico e o servidor responde ao User-Agent identificado,
+# entao nao ha friccao juridica nem tecnica em rastrea-lo.
+
+name: rosap_crawl
+kind: crawl
+strategy: focused
+
+seeds:
+  # Paginas de aterrissagem de ConOps confirmados, e uma pagina de navegacao.
+  - https://rosap.ntl.bts.gov/view/dot/78914
+  - https://rosap.ntl.bts.gov/gsearch?q=concept+of+operations
+  - https://rosap.ntl.bts.gov/
+
+scope:
+  allow_hosts:
+    - rosap.ntl.bts.gov
+  deny_paths:
+    - '/login'
+    - '/cart'
+    - '/api/'
+    - '/fedora/'        # o OAI-PMH tem adaptador proprio; nao rastrear
+  max_depth: 3
+  max_pages: 300
+
+# Padrao confirmado: /view/dot/78914/dot_78914_DS1.pdf
+document_extensions: ['.pdf']
+
+# Sem sitemap util neste host.
+sitemap: none
+render: false
+
+notes: >
+  Em producao, prefira o adaptador OAI-PMH (`discover rosap`): entrega 100
+  registros com metadado Dublin Core completo por requisicao, contra ~1 por
+  requisicao no rastreamento. Este spec serve para medir essa diferenca, nao
+  para substituir o harvester.

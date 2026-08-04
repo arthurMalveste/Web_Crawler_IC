@@ -1,0 +1,263 @@
+{
+  "fonte": "rosap_crawl",
+  "orcamento_paginas": 40,
+  "bfs": {
+    "paginas_baixadas": 23,
+    "paginas_renderizadas": 0,
+    "documentos_encontrados": 10,
+    "documentos_relevantes": 0,
+    "links_vistos": 1127,
+    "fora_de_escopo": 629,
+    "armadilhas_evitadas": 0,
+    "erros": 22,
+    "urls_do_sitemap": 0,
+    "segundos": 55.9,
+    "harvest_rate": 0.0,
+    "curva": [
+      [
+        1,
+        0
+      ],
+      [
+        2,
+        0
+      ],
+      [
+        3,
+        0
+      ],
+      [
+        4,
+        0
+      ],
+      [
+        5,
+        0
+      ],
+      [
+        6,
+        0
+      ],
+      [
+        7,
+        0
+      ],
+      [
+        8,
+        0
+      ],
+      [
+        9,
+        0
+      ],
+      [
+        10,
+        0
+      ],
+      [
+        11,
+        0
+      ],
+      [
+        12,
+        0
+      ],
+      [
+        13,
+        0
+      ],
+      [
+        14,
+        0
+      ],
+      [
+        15,
+        0
+      ],
+      [
+        16,
+        0
+      ],
+      [
+        17,
+        0
+      ],
+      [
+        18,
+        0
+      ]
+    ]
+  },
+  "focado": {
+    "paginas_baixadas": 40,
+    "paginas_renderizadas": 0,
+    "documentos_encontrados": 8,
+    "documentos_relevantes": 0,
+    "links_vistos": 2554,
+    "fora_de_escopo": 1435,
+    "armadilhas_evitadas": 0,
+    "erros": 1,
+    "urls_do_sitemap": 0,
+    "segundos": 73.5,
+    "harvest_rate": 0.0,
+    "curva": [
+      [
+        1,
+        0
+      ],
+      [
+        2,
+        0
+      ],
+      [
+        3,
+        0
+      ],
+      [
+        4,
+        0
+      ],
+      [
+        5,
+        0
+      ],
+      [
+        6,
+        0
+      ],
+      [
+        7,
+        0
+      ],
+      [
+        8,
+        0
+      ],
+      [
+        9,
+        0
+      ],
+      [
+        10,
+        0
+      ],
+      [
+        11,
+        0
+      ],
+      [
+        12,
+        0
+      ],
+      [
+        13,
+        0
+      ],
+      [
+        14,
+        0
+      ],
+      [
+        15,
+        0
+      ],
+      [
+        16,
+        0
+      ],
+      [
+        17,
+        0
+      ],
+      [
+        18,
+        0
+      ],
+      [
+        19,
+        0
+      ],
+      [
+        20,
+        0
+      ],
+      [
+        21,
+        0
+      ],
+      [
+        22,
+        0
+      ],
+      [
+        23,
+        0
+      ],
+      [
+        24,
+        0
+      ],
+      [
+        25,
+        0
+      ],
+      [
+        26,
+        0
+      ],
+      [
+        27,
+        0
+      ],
+      [
+        28,
+        0
+      ],
+      [
+        29,
+        0
+      ],
+      [
+        30,
+        0
+      ],
+      [
+        31,
+        0
+      ],
+      [
+        32,
+        0
+      ],
+      [
+        33,
+        0
+      ],
+      [
+        34,
+        0
+      ],
+      [
+        35,
+        0
+      ],
+      [
+        36,
+        0
+      ],
+      [
+        37,
+        0
+      ],
+      [
+        38,
+        0
+      ],
+      [
+        39,
+        0
+      ]
+    ]
+  },
+  "ganho_harvest_rate": null
+}

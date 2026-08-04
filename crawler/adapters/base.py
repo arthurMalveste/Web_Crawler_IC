@@ -20,6 +20,10 @@ class BaseAdapter(ABC):
     #: identificador curto usado em `DocumentRecord.source` e nos relatorios
     name: str = "base"
 
+    #: Quando True, a fonte existe para fornecer negativos dificeis e o
+    #: amostrador da classe negativa e desligado: coleta-se todo o acervo.
+    collect_all_negatives: bool = False
+
     def __init__(self, fetcher: Fetcher, **options: Any):
         self.fetcher = fetcher
         self.options = options

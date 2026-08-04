@@ -1,0 +1,896 @@
+<meta charset="utf-8">
+<title>ConOps Retrieval Pipeline — Documentação do Sistema</title>
+<style>
+  @page { size: A4; margin: 20mm 18mm 22mm 18mm; }
+  * { box-sizing: border-box; }
+  body {
+    font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+    font-size: 10.2pt; line-height: 1.55; color: #1a1a1a; margin: 0;
+  }
+  h1 { font-size: 21pt; margin: 0 0 4pt; color: #0b3a5d; line-height: 1.2; }
+  h2 {
+    font-size: 15pt; margin: 26pt 0 8pt; color: #0b3a5d;
+    border-bottom: 2px solid #0b3a5d; padding-bottom: 3pt;
+    page-break-after: avoid; break-after: avoid;
+  }
+  h3 {
+    font-size: 12pt; margin: 16pt 0 5pt; color: #1c5c8c;
+    page-break-after: avoid; break-after: avoid;
+  }
+  h4 { font-size: 10.6pt; margin: 11pt 0 3pt; color: #333; page-break-after: avoid; }
+  p { margin: 0 0 7pt; text-align: justify; }
+  ul, ol { margin: 0 0 8pt; padding-left: 17pt; }
+  li { margin-bottom: 3.5pt; }
+  code {
+    font-family: "Consolas", "Courier New", monospace; font-size: 9pt;
+    background: #eef2f6; padding: 1px 4px; border-radius: 3px; color: #0b3a5d;
+  }
+  pre {
+    font-family: "Consolas", "Courier New", monospace; font-size: 8.4pt;
+    background: #f6f8fa; border: 1px solid #d8dee4; border-left: 3px solid #0b3a5d;
+    padding: 8pt 10pt; overflow-x: auto; line-height: 1.42;
+    page-break-inside: avoid; break-inside: avoid; margin: 0 0 9pt;
+  }
+  pre code { background: none; padding: 0; color: #1a1a1a; }
+  table {
+    width: 100%; border-collapse: collapse; margin: 0 0 10pt; font-size: 9.2pt;
+    page-break-inside: avoid; break-inside: avoid;
+  }
+  th {
+    background: #0b3a5d; color: #fff; text-align: left;
+    padding: 5pt 7pt; font-weight: 600;
+  }
+  td { padding: 4.5pt 7pt; border-bottom: 1px solid #dde3e9; vertical-align: top; }
+  tr:nth-child(even) td { background: #f7f9fb; }
+  .num { text-align: right; }
+  .capa {
+    text-align: center; padding: 55mm 0 0; page-break-after: always; break-after: page;
+  }
+  .capa .sub { font-size: 13pt; color: #444; margin-top: 8pt; }
+  .capa .meta { margin-top: 30mm; font-size: 10.5pt; color: #555; line-height: 1.9; }
+  .capa .tag {
+    display: inline-block; background: #0b3a5d; color: #fff;
+    padding: 4pt 12pt; border-radius: 12pt; font-size: 9pt; margin-bottom: 14pt;
+  }
+  .box {
+    border: 1px solid #c8d4de; border-left: 4px solid #1c5c8c; background: #f4f8fb;
+    padding: 8pt 11pt; margin: 0 0 10pt; page-break-inside: avoid; break-inside: avoid;
+  }
+  .box.alerta { border-left-color: #b8860b; background: #fdf9ef; border-color: #e3d5aa; }
+  .box.erro   { border-left-color: #a52a2a; background: #fdf4f4; border-color: #e8c8c8; }
+  .box.ok     { border-left-color: #2e7d32; background: #f3f9f3; border-color: #c8e0c8; }
+  .box p:last-child, .box ul:last-child { margin-bottom: 0; }
+  .box .titulo { font-weight: 600; display: block; margin-bottom: 4pt; }
+  .glossario dt { font-weight: 600; color: #0b3a5d; margin-top: 7pt; font-size: 10pt; }
+  .glossario dd { margin: 1pt 0 0 0; padding-left: 12pt; text-align: justify; }
+  .quebra { page-break-before: always; break-before: page; }
+  .sumario ol { list-style: none; padding-left: 0; counter-reset: s; }
+  .sumario > ol > li { counter-increment: s; margin-bottom: 4pt; font-weight: 600; }
+  .sumario > ol > li::before { content: counter(s) ". "; color: #1c5c8c; }
+  .sumario ol ol { padding-left: 16pt; margin-top: 2pt; }
+  .sumario ol ol li { font-weight: 400; font-size: 9.4pt; color: #444; margin-bottom: 1.5pt; }
+  .legenda { font-size: 8.6pt; color: #666; margin: -6pt 0 10pt; font-style: italic; }
+  .pill {
+    display: inline-block; font-size: 8pt; padding: 1pt 6pt; border-radius: 8pt;
+    font-weight: 600; white-space: nowrap;
+  }
+  .pill.ok   { background: #d8ecd9; color: #205c23; }
+  .pill.parc { background: #fdf0d0; color: #7a5800; }
+  .pill.nao  { background: #f5d9d9; color: #8a2020; }
+</style>
+
+<div class="capa">
+  <div class="tag">Iniciação Científica · FT/UNICAMP</div>
+  <h1>ConOps Retrieval Pipeline</h1>
+  <div class="sub">Etapa 1 — Coleta Automática de Dados<br><em>Web Crawling</em> e recuperação de documentos de concepção</div>
+  <div class="meta">
+    <strong>Projeto:</strong> Busca Automática e Classificação Semântica de<br>
+    Documentos de Concepção de Sistemas Críticos para Utilização no Processo STPA<br><br>
+    <strong>Autor:</strong> Arthur Miele Malveste<br>
+    <strong>Orientadora:</strong> Profa. Dra. Ana Estela Antunes da Silva<br>
+    <strong>Coorientador:</strong> Prof. Dr. Pedro Ivo Garcia Nunes<br><br>
+    <strong>Documentação técnica do sistema</strong><br>
+    Agosto de 2026
+  </div>
+</div>
+
+<div class="sumario">
+<h2>Sumário</h2>
+<ol>
+  <li>Para que serve este sistema
+    <ol><li>O problema que ele resolve</li><li>Onde ele se encaixa no pipeline da IC</li><li>O que é um ConOps</li></ol>
+  </li>
+  <li>Glossário — toda a nomenclatura explicada</li>
+  <li>Visão geral da arquitetura
+    <ol><li>As quatro camadas</li><li>As três vias de acesso a uma fonte</li></ol>
+  </li>
+  <li>Passo a passo: o que acontece quando você roda um comando</li>
+  <li>Arquitetura detalhada, módulo por módulo
+    <ol>
+      <li>Núcleo (<code>crawler/core/</code>)</li>
+      <li>Motor de rastreamento (<code>crawler/engine/</code>)</li>
+      <li>Adaptadores (<code>crawler/adapters/</code>)</li>
+      <li>Interface de linha de comando</li>
+    </ol>
+  </li>
+  <li>Conceitos que costumam confundir
+    <ol><li>Por que existem duas filas</li><li>Três identidades diferentes</li><li>Descobrir ≠ baixar</li></ol>
+  </li>
+  <li>O pré-filtro léxico e as quatro faixas</li>
+  <li>O rastreamento focado (<em>Web Crawling semântico</em>)</li>
+  <li>Inventário de fontes e situação de cada uma</li>
+  <li>Conformidade legal e ética</li>
+  <li>O que já está pronto — pontos positivos</li>
+  <li>Limitações e pontos negativos</li>
+  <li>Próximos passos priorizados</li>
+  <li>Referência rápida de comandos</li>
+</ol>
+</div>
+
+<div class="quebra"></div>
+<h2>1. Para que serve este sistema</h2>
+
+<h3>1.1 O problema que ele resolve</h3>
+<p>
+A <strong>STPA</strong> (<em>System-Theoretic Process Analysis</em>) é uma técnica de análise de perigos que trata segurança como um problema de controle inadequado entre componentes de um sistema. Sua etapa inicial exige identificar perdas, perigos e restrições de segurança a partir de bases extensas de documentos técnicos não estruturados.
+</p>
+<p>
+Hoje essa busca e triagem é <strong>predominantemente manual</strong>: um engenheiro precisa vasculhar repositórios da NASA, ESA e do Departamento de Defesa dos EUA, abrir documentos um a um e julgar se cada um é ou não um documento de concepção. É lento, caro e sujeito a fadiga e erro humano.
+</p>
+<p>
+Este sistema automatiza a <strong>primeira etapa</strong> desse trabalho: encontrar e baixar os documentos candidatos, de forma reprodutível e com procedência registrada.
+</p>
+
+<h3>1.2 Onde ele se encaixa no pipeline da IC</h3>
+<p>O projeto de Iniciação Científica tem cinco etapas sequenciais. Este repositório implementa a primeira:</p>
+
+<table>
+<tr><th style="width:8%">Etapa</th><th style="width:32%">O que faz</th><th>Situação</th></tr>
+<tr><td><strong>1</strong></td><td>Coleta automática (<em>Web Crawling</em>)</td><td><span class="pill ok">ESTE SISTEMA</span> — implementado e rodando</td></tr>
+<tr><td>2</td><td>Extração de texto e pré-processamento</td><td>Futura — 87% dos documentos do NTRS já chegam com texto extraído, o que reduz muito o trabalho desta etapa</td></tr>
+<tr><td>3</td><td>Filtragem por palavras-chave sobre o texto completo</td><td>Futura — o <code>lexicon.yaml</code> construído aqui é reaproveitado integralmente</td></tr>
+<tr><td>4</td><td>Representação semântica (<em>embeddings</em> BERT)</td><td>Futura — o pontuador de links foi desenhado para depois usar esses vetores</td></tr>
+<tr><td>5</td><td>Classificação automática por LLM</td><td>Futura — a classe negativa coletada aqui é o que torna a avaliação possível</td></tr>
+</table>
+
+<div class="box">
+<span class="titulo">Por que a Etapa 1 determina a qualidade da Etapa 5</span>
+<p>
+O objetivo científico final é <strong>aferir se um LLM classifica ConOps de forma confiável</strong>. Isso é uma medição, e toda medição depende do conjunto sobre o qual é feita. Se o corpus vier majoritariamente de um único repositório, o classificador aprende a reconhecer <em>o formato daquele repositório</em> em vez de reconhecer <em>o que é um ConOps</em> — e a métrica final ficaria inflada, sem se sustentar fora do acervo de origem.
+</p>
+<p>
+Por isso a <strong>diversidade de fonte é requisito de validade experimental</strong>, e não conveniência de engenharia. É esse o argumento que justifica construir um <em>crawler</em> genérico em vez de apenas consumir as duas ou três APIs disponíveis.
+</p>
+</div>
+
+<h3>1.3 O que é um ConOps</h3>
+<p>
+<strong>ConOps</strong> (<em>Concept of Operations</em>, ou "Concepção de Operações") é um documento que descreve <strong>como um sistema será operado</strong> — do ponto de vista de quem o usa, não de quem o constrói. Ele responde: quem são os usuários, em que ambiente o sistema opera, quais cenários operacionais existem, o que muda em relação ao sistema atual.
+</p>
+<p>
+Duas normas definem a estrutura canônica de um ConOps: a <strong>ISO/IEC/IEEE 29148:2011</strong> e a <strong>ANSI/AIAA G-043A-2012</strong>. Elas prescrevem seções como <em>"current system or situation"</em>, <em>"justification for and nature of changes"</em>, <em>"operational scenarios"</em> e <em>"summary of impacts"</em>. Esses títulos de seção são um sinal muito mais específico que o termo isolado "concept of operations", e por isso entram no léxico do sistema.
+</p>
+<p>
+Para a STPA, o ConOps é a fonte primária: é dele que se extraem as perdas a evitar, os perigos e o contexto operacional.
+</p>
+
+<div class="quebra"></div>
+<h2>2. Glossário — toda a nomenclatura explicada</h2>
+<p>Os termos abaixo aparecem no código e no restante deste documento. A maioria vem da literatura de recuperação de informação e engenharia web.</p>
+
+<dl class="glossario">
+
+<dt>Crawler (rastreador) / Web Crawling</dt>
+<dd>Programa que navega automaticamente por páginas web seguindo os links de uma para outra, como um usuário clicando. "Rastrear um site" é visitar suas páginas de forma sistemática. É o caso geral de coleta, usado quando não existe uma interface melhor.</dd>
+
+<dt>Harvester (colhedor)</dt>
+<dd>Programa que consome uma <em>interface estruturada</em> de um repositório — uma API ou um protocolo — em vez de navegar HTML. É mais rápido, mais confiável e traz metadados melhores. Neste sistema, o NTRS e o ROSA P são colhidos, não rastreados.</dd>
+
+<dt>API REST</dt>
+<dd><em>Application Programming Interface</em> no estilo REST: um endereço web que devolve dados estruturados (normalmente JSON) em vez de página HTML. A API do NTRS devolve até 500 registros de documento por requisição, cada um com título, autores, resumo e categoria.</dd>
+
+<dt>OAI-PMH</dt>
+<dd><em>Open Archives Initiative Protocol for Metadata Harvesting</em>. Protocolo padronizado que repositórios acadêmicos e governamentais usam para expor seu acervo a colhedores externos. Tem verbos fixos (<code>ListRecords</code>, <code>GetRecord</code>, <code>Identify</code>) e suporta coleta incremental — pedir só o que mudou desde a última vez. O ROSA P do Departamento de Transportes dos EUA expõe um.</dd>
+
+<dt>Dublin Core</dt>
+<dd>Conjunto padronizado de campos de metadado (<code>dc:title</code>, <code>dc:creator</code>, <code>dc:date</code>, <code>dc:subject</code>...) usado por bibliotecas e repositórios. É o formato que o OAI-PMH do ROSA P devolve.</dd>
+
+<dt>Adapter (adaptador)</dt>
+<dd>No código, um módulo que sabe conversar com <strong>uma</strong> fonte específica e traduzir o formato dela para o formato interno do sistema. Existe um adaptador para o NTRS, um para o ROSA P e um genérico que embrulha o motor de rastreamento. Todos entregam o mesmo tipo de objeto, então o resto do sistema não precisa saber de onde veio.</dd>
+
+<dt>DocumentRecord</dt>
+<dd>O <strong>contrato central</strong> do sistema: a estrutura de dados que descreve um documento candidato (título, resumo, autores, URLs, direitos, procedência). Todo adaptador produz <code>DocumentRecord</code>; toda camada seguinte consome <code>DocumentRecord</code>. É o que permite trocar de fonte sem mexer no resto.</dd>
+
+<dt>SourceSpec</dt>
+<dd>Arquivo YAML que descreve uma fonte a ser rastreada: por onde começar, até onde ir, o que seguir, o que evitar, qual o orçamento. Adicionar um repositório novo ao sistema custa escrever um desses — nenhum código Python.</dd>
+
+<dt>Seed (semente)</dt>
+<dd>URL de partida de um rastreamento. É a escolha humana explícita de por onde começar. Ex.: a página de documentação da FAA, ou o PDF do UAM ConOps 2.0.</dd>
+
+<dt>Frontier (fronteira)</dt>
+<dd>A fila de coisas ainda não processadas. Termo padrão em literatura de <em>crawling</em>. Este sistema tem <strong>duas</strong> fronteiras distintas, e confundi-las é o erro conceitual mais comum — a seção 6.1 explica a diferença.</dd>
+
+<dt>Scope (escopo)</dt>
+<dd>Os limites do rastreamento: quais domínios podem ser visitados, quais caminhos de URL seguir ou evitar, profundidade máxima, orçamento de páginas. Sem escopo, "rastrear faa.gov" vira rastrear a internet inteira, porque um link leva a outro domínio que leva a outro.</dd>
+
+<dt>Depth (profundidade)</dt>
+<dd>Quantos "cliques" a página está da semente. A semente é profundidade 0; as páginas linkadas nela são 1; as linkadas nessas são 2, e assim por diante.</dd>
+
+<dt>Anchor (âncora)</dt>
+<dd>O texto clicável de um link. Em <code>&lt;a href="/doc.pdf"&gt;Concept of Operations v2&lt;/a&gt;</code>, a âncora é "Concept of Operations v2". É uma pista valiosa sobre o que há do outro lado do link — quando não é genérica como "clique aqui".</dd>
+
+<dt>BFS (busca em largura)</dt>
+<dd><em>Breadth-First Search</em>. Estratégia de navegação que visita todas as páginas de profundidade 1, depois todas as de profundidade 2, e assim por diante — sem julgar relevância. É o comportamento padrão de um <em>crawler</em> ingênuo, e neste sistema serve de <strong>linha de base</strong> para comparação.</dd>
+
+<dt>Focused crawling (rastreamento focado)</dt>
+<dd>Estratégia que <strong>estima a relevância de um link antes de segui-lo</strong> e visita primeiro o que promete mais. Vem de Chakrabarti et al. (1999). É a implementação literal do "Web Crawling semântico" mencionado na introdução do projeto de IC.</dd>
+
+<dt>Harvest rate (taxa de colheita)</dt>
+<dd>Métrica de eficiência do rastreamento: <strong>documentos relevantes encontrados ÷ páginas HTML baixadas</strong>. Responde "quanto trabalho útil cada requisição produziu?". É o número que compara o rastreamento focado com o BFS.</dd>
+
+<dt>Sitemap</dt>
+<dd>Arquivo XML que o próprio administrador do site publica listando os endereços de suas páginas. Quando existe, entrega em uma requisição o que o rastreamento levaria centenas para descobrir. Sempre vale tentar antes de navegar.</dd>
+
+<dt>robots.txt</dt>
+<dd>Arquivo na raiz de um site que declara quais partes os rastreadores automáticos podem ou não visitar. É uma convenção de boa conduta, não um mecanismo de segurança. O sistema lê e respeita esse arquivo em todas as fontes.</dd>
+
+<dt>User-Agent (UA)</dt>
+<dd>Texto que todo cliente HTTP envia se identificando ao servidor. Um navegador envia algo como <code>Mozilla/5.0 (Windows NT 10.0...) Chrome/127</code>. Este sistema envia, por padrão, uma identificação acadêmica com e-mail de contato, para que administradores possam identificá-lo e contatá-lo.</dd>
+
+<dt>WAF</dt>
+<dd><em>Web Application Firewall</em>. Camada de proteção (Akamai, Cloudflare) posta na frente de um site, que bloqueia requisições segundo regras genéricas — entre elas, User-Agents que não parecem de navegador. Foi o que impediu o acesso à FAA e à DTIC.</dd>
+
+<dt>Magic bytes</dt>
+<dd>Os primeiros bytes de um arquivo, que identificam seu formato. Todo PDF começa com <code>%PDF-</code>. O sistema valida o tipo pelos <em>magic bytes</em> e não pelo cabeçalho <code>Content-Type</code>, porque servidores governamentais erram esse cabeçalho com frequência — chegam a anunciar "application/pdf" e devolver uma página de erro HTML.</dd>
+
+<dt>ETag / If-None-Match</dt>
+<dd>Mecanismo HTTP de cache. O servidor manda um identificador de versão (<code>ETag</code>) junto do arquivo; numa reexecução o cliente envia esse identificador de volta e o servidor responde "304 Não Modificado" sem retransmitir o conteúdo. Economiza banda nas coletas repetidas.</dd>
+
+<dt>SHA-256</dt>
+<dd>Função de <em>hash</em> criptográfico: converte qualquer arquivo numa impressão digital de 64 caracteres. Arquivos idênticos produzem o mesmo <em>hash</em>; arquivos diferentes, <em>hashes</em> diferentes. É como o sistema detecta que o mesmo ConOps veio da FAA <em>e</em> do ROSA P.</dd>
+
+<dt>Content-addressed storage (armazenamento endereçado por conteúdo)</dt>
+<dd>Guardar o arquivo com o próprio <em>hash</em> como nome. Consequências: deduplicação automática, e coleta idempotente — rodar duas vezes não duplica nada.</dd>
+
+<dt>Idempotência</dt>
+<dd>Propriedade de uma operação que, executada várias vezes, produz o mesmo resultado de executá-la uma vez. Aqui: reexecutar a coleta não duplica documentos nem refaz downloads já concluídos. Verificado em produção — a segunda execução da descoberta no NTRS devolveu "377 vistos, 0 novos".</dd>
+
+<dt>Rate limiting (limitação de taxa)</dt>
+<dd>Espaçar as requisições no tempo para não sobrecarregar o servidor. O NTRS publica seu limite (500 requisições a cada 15 minutos) em cabeçalhos HTTP, e o sistema lê e obedece a esses cabeçalhos.</dd>
+
+<dt>Backoff exponencial</dt>
+<dd>Quando uma requisição falha, esperar antes de tentar de novo — e dobrar a espera a cada nova falha (2s, 4s, 8s...). Evita martelar um servidor que já está com problema.</dd>
+
+<dt>Tier (faixa)</dt>
+<dd>A classificação que o pré-filtro atribui a cada candidato: <code>strong</code>, <code>weak</code>, <code>hard_negative</code> ou <code>negative_sample</code>. Determina se o arquivo será baixado e como será usado na validação.</dd>
+
+<dt>Hard negative (negativo difícil)</dt>
+<dd>Documento que <strong>parece</strong> pertencer à classe alvo mas não pertence. No caso: apresentações do workshop MIT STAMP, densas em terminologia de segurança de sistemas, mas que não são documentos de concepção. São os exemplos mais informativos para validar um classificador — se ele acerta estes, aprendeu o padrão de verdade em vez de detectar jargão.</dd>
+
+<dt>Playwright</dt>
+<dd>Biblioteca que controla um navegador real sem interface gráfica (<em>headless</em>). Necessária para páginas que montam o conteúdo por JavaScript — o HTML entregue pelo servidor vem vazio, e só depois de executar os scripts os links aparecem.</dd>
+
+<dt>Fixture</dt>
+<dd>Em testes, um arquivo com uma resposta real gravada (um JSON da API do NTRS, um XML do ROSA P). Permite testar o código sem acessar a rede, o que torna os testes rápidos e independentes de os servidores estarem no ar.</dd>
+
+<dt>Trap (armadilha de rastreamento)</dt>
+<dd>Padrão de URL que gera páginas infinitas: calendários com link para "próximo mês" para sempre, buscas facetadas onde cada combinação de filtros é um endereço novo, caminhos que se repetem (<code>/a/b/a/b/a/b...</code>). Um rastreador que não as detecta nunca termina.</dd>
+
+</dl>
+
+<div class="quebra"></div>
+<h2>3. Visão geral da arquitetura</h2>
+
+<h3>3.1 As quatro camadas</h3>
+<p>O sistema é dividido em quatro camadas desacopladas. "Desacopladas" significa que cada uma conhece apenas o formato de dados que recebe e entrega, não como as outras funcionam por dentro.</p>
+
+<pre><code>┌──────────────────────────────────────────────────────────────────┐
+│ 1. DESCOBERTA                                                    │
+│    Encontra documentos candidatos. Um adaptador por fonte,        │
+│    todos com a mesma interface.                                   │
+│    NTRSAdapter · RosaPAdapter · CrawlAdapter                      │
+│                        ↓ todos emitem DocumentRecord              │
+├──────────────────────────────────────────────────────────────────┤
+│ 2. FILA + PRÉ-FILTRO                                             │
+│    Banco SQLite guarda estado, evita duplicatas e permite         │
+│    retomar de onde parou. O pré-filtro léxico decide, a partir    │
+│    do metadado, SE vale a pena baixar o arquivo.                  │
+├──────────────────────────────────────────────────────────────────┤
+│ 3. FETCH (busca)                                                 │
+│    Um único downloader para todo o sistema, com políticas por     │
+│    domínio: robots.txt, limite de taxa, backoff, validação por    │
+│    magic bytes, teto de tamanho e de tempo.                       │
+├──────────────────────────────────────────────────────────────────┤
+│ 4. ARMAZENAMENTO                                                 │
+│    Arquivos gravados com o SHA-256 como nome + manifesto JSONL    │
+│    com toda a procedência.                                        │
+└──────────────────────────────────────────────────────────────────┘
+                              ↓
+                    entrada da Etapa 2</code></pre>
+
+<p><strong>Por que separar assim.</strong> A camada 1 muda a cada fonte nova; as camadas 2, 3 e 4 nunca mudam. Um adaptador só precisa saber traduzir o formato nativo da sua fonte — limite de taxa, robots.txt, deduplicação e armazenamento não são problema dele.</p>
+
+<h3>3.2 As três vias de acesso a uma fonte</h3>
+<p>Nem toda fonte se acessa do mesmo jeito. O sistema tem três vias, e escolhe a melhor disponível para cada repositório:</p>
+
+<table>
+<tr><th style="width:20%">Via</th><th style="width:32%">Quando usar</th><th>Custo por documento</th></tr>
+<tr>
+  <td><strong>API dedicada</strong></td>
+  <td>O repositório publica uma API REST documentada. Ex.: NTRS.</td>
+  <td>Baixíssimo — 1 requisição traz até 500 registros com metadado completo</td>
+</tr>
+<tr>
+  <td><strong>Protocolo padrão</strong></td>
+  <td>O repositório expõe OAI-PMH, <em>sitemap</em> ou <em>dumps</em> em CSV. Ex.: ROSA P, FAA, CORDIS.</td>
+  <td>Baixo — 1 requisição traz 100 registros (OAI-PMH) ou milhares de URLs (<em>sitemap</em>)</td>
+</tr>
+<tr>
+  <td><strong>Rastreamento HTML</strong></td>
+  <td>Não há nenhuma das anteriores. É o <strong>caso geral</strong>. Ex.: MIT PSAS, ESA Cosmos.</td>
+  <td>Alto — cada requisição traz uma página, da qual se extraem alguns links</td>
+</tr>
+</table>
+
+<div class="box">
+<span class="titulo">A regra do sistema</span>
+<p><strong>Interface estruturada quando existe; rastreamento sempre que não.</strong> Não é preguiça preferir a API — é uma questão de ordem de grandeza. Colher 4.000 registros do ROSA P por OAI-PMH leva 40 segundos. Rastrear os mesmos 4.000 em HTML levaria horas e imporia carga desnecessária a um servidor público.</p>
+<p>Mas o rastreamento não é "último recurso": é o que permite ao projeto atacar qualquer repositório novo sem escrever código, e é o que garante a diversidade de fonte de que a Etapa 5 depende.</p>
+</div>
+
+<div class="quebra"></div>
+<h2>4. Passo a passo: o que acontece quando você roda um comando</h2>
+<p>Esta seção acompanha uma execução real do começo ao fim. É a parte mais importante para entender o sistema.</p>
+
+<h3>Comando</h3>
+<pre><code>python -m crawler.cli discover faa --max-pages 200</code></pre>
+<p class="legenda">"Descubra documentos candidatos na fonte 'faa', gastando no máximo 200 páginas."</p>
+
+<h3>Passo 1 — Carregamento da configuração</h3>
+<p>A CLI (<em>Command Line Interface</em>, interface de linha de comando) lê dois arquivos:</p>
+<ul>
+  <li><code>config/domains.yaml</code> — as políticas de rede: quanto esperar entre requisições em cada domínio, qual User-Agent usar, tetos de tamanho e tempo, e a <em>blocklist</em> de domínios proibidos.</li>
+  <li><code>config/lexicon.yaml</code> — o vocabulário que define o que é um ConOps: termos fortes, assinatura estrutural das normas ISO 29148 e AIAA G-043A, marcadores adversariais e pesos.</li>
+</ul>
+
+<h3>Passo 2 — Resolução da fonte</h3>
+<p>A CLI verifica se <code>faa</code> é um dos adaptadores dedicados (<code>ntrs</code> ou <code>rosap</code>). Não é. Então procura <code>config/sources/faa.yaml</code> e carrega o <code>SourceSpec</code>:</p>
+<pre><code>seeds:                              # por onde começar
+  - .../Final_CSINAS_ConOps.pdf
+  - .../Urban Air Mobility (UAM) Concept of Operations 2.0.pdf
+  - https://www.faa.gov/uas/advanced_operations
+scope:
+  allow_hosts: [faa.gov]            # só este domínio
+  allow_paths: ['/uas/', '/air_traffic/', '/nextgen/', ...]
+  deny_paths:  ['/jobs', '/foia', '/search', ...]
+  max_depth: 3                      # no máximo 3 cliques da semente
+  max_pages: 400                    # orçamento
+strategy: focused                   # pontuar links antes de seguir
+sitemap: auto                       # tentar sitemap antes de navegar</code></pre>
+
+<h3>Passo 3 — Semeadura da fronteira de URLs</h3>
+<p>As sementes entram na fila de URLs com prioridade máxima (1000) — são escolha humana explícita. Cada semente é classificada como <strong>documento</strong> (termina em <code>.pdf</code>) ou <strong>página</strong> (a expandir).</p>
+
+<h3>Passo 4 — Tentativa de sitemap</h3>
+<p>Antes de navegar, o sistema procura um <em>sitemap</em>: primeiro o declarado no <code>robots.txt</code>, depois o endereço padrão <code>/sitemap.xml</code>. Na FAA isso devolveu <strong>4.175 URLs</strong> em poucas requisições.</p>
+<p>Cada URL do <em>sitemap</em> é filtrada pelo escopo, pontuada e enfileirada. Existe um orçamento (<code>SitemapBudget</code>) que abandona a tentativa se o rendimento for baixo — no ESA Cosmos, o índice apontava para 87 sub-<em>sitemaps</em> de <strong>uma URL cada</strong>, o que consumiria o orçamento inteiro sem proveito.</p>
+
+<h3>Passo 5 — O laço principal</h3>
+<p>Enquanto houver orçamento e URLs pendentes:</p>
+<ol>
+  <li><strong>Escolher a próxima URL.</strong> A fila devolve a de maior prioridade; em caso de empate, a de menor profundidade. <em>É aqui que as duas estratégias diferem:</em> no modo focado as prioridades vêm do pontuador; no BFS todas valem zero, e a ordenação por profundidade produz exatamente busca em largura.</li>
+  <li><strong>Verificar o orçamento por host</strong> — impede que um único domínio consuma tudo.</li>
+  <li><strong>Baixar a página</strong> pela camada de <em>fetch</em>, que aplica: consulta ao <code>robots.txt</code> (com cache), espera do limite de taxa, User-Agent apropriado, <em>backoff</em> em caso de erro, e validação do conteúdo por <em>magic bytes</em>.</li>
+  <li><strong>Interpretar o HTML</strong> com BeautifulSoup.</li>
+  <li><strong>Extrair os metadados do <code>&lt;head&gt;</code></strong> — <code>citation_*</code> (padrão Highwire, usado pelo Google Scholar), <code>DC.*</code> (Dublin Core), OpenGraph e JSON-LD. É isto que dá a uma fonte HTML metadado comparável ao de uma API. O resultado fica em cache para uso posterior.</li>
+  <li><strong>Extrair os links</strong>, cada um com sua âncora e o texto ao redor.</li>
+  <li><strong>Para cada link:</strong> está no escopo? é armadilha? Se sobreviver, o pontuador calcula sua prioridade e ele entra na fila.</li>
+</ol>
+
+<h3>Passo 6 — Emissão dos registros</h3>
+<p>Terminada a travessia, cada documento descoberto vira um <code>DocumentRecord</code>. O ponto delicado aqui é <strong>escolher o título</strong>, porque é sobre ele que o pré-filtro decidirá se o documento é relevante:</p>
+<ol>
+  <li>Se a página que continha o link é a <em>landing page</em> daquele documento — ou porque declarou <code>citation_pdf_url</code> apontando para ele, ou porque continha um único documento — usa-se o metadado da página.</li>
+  <li>Senão, usa-se a âncora, desde que informativa ("UAM Concept of Operations 2.0" serve; "Download PDF" ou uma URL, não).</li>
+  <li>Em último caso, o nome do arquivo, limpo (<code>uam-conops-2.pdf</code> → "uam conops 2").</li>
+</ol>
+
+<h3>Passo 7 — Pré-filtro e enfileiramento</h3>
+<p>Cada <code>DocumentRecord</code> passa pelo <em>pipeline</em>:</p>
+<ol>
+  <li><strong>Controle de exportação:</strong> se o metadado marca ITAR ou EAR, o registro é descartado antes de tudo e a razão é registrada.</li>
+  <li><strong>Pontuação léxica:</strong> título, resumo e assuntos são comparados ao léxico, resultando numa faixa.</li>
+  <li><strong>Amostragem de negativos:</strong> documentos sem sinal são amostrados (cerca de 1 em 8, com teto por fonte) — exceto em fontes marcadas como <code>hard_negatives</code>, onde tudo é coletado.</li>
+  <li><strong>Inserção na fila de documentos</strong> (banco SQLite separado), se ainda não conhecido.</li>
+</ol>
+
+<h3>Passo 8 — A coleta propriamente dita</h3>
+<p>Este é um <strong>comando separado</strong>, executado depois:</p>
+<pre><code>python -m crawler.cli harvest --tier strong weak --limit 100</code></pre>
+<p>Para cada candidato pendente, o sistema percorre suas URLs <strong>em ordem de preferência</strong>. No NTRS, o <code>.txt</code> vem antes do <code>.pdf</code> — quando existe, a NASA já entregou o texto extraído e a Etapa 2 não precisa rodar para aquele documento.</p>
+<p>Baixado o arquivo: calcula-se o SHA-256, grava-se em <code>raw/{2 primeiros dígitos}/{sha}.pdf</code>, valida-se a integridade com pypdf, e registra-se tudo no manifesto. Se o SHA já existia, o arquivo <strong>não</strong> é regravado — apenas acumula-se mais uma procedência.</p>
+
+<div class="box ok">
+<span class="titulo">Por que descoberta e coleta são comandos separados</span>
+<p>A descoberta lê <strong>só metadados</strong>: é barata e pode ser reexecutada à vontade quando o léxico mudar. A coleta gasta <strong>banda e disco</strong>. Medir a cobertura do sistema contra um conjunto de referência exige apenas a primeira fase — e é por isso que expandir o vocabulário e testar de novo custa quase nada.</p>
+</div>
+
+<div class="quebra"></div>
+<h2>5. Arquitetura detalhada, módulo por módulo</h2>
+<p>São 3.903 linhas de código de produção, 1.716 de testes e 632 de configuração, distribuídas em três pacotes.</p>
+
+<h3>5.1 Núcleo — <code>crawler/core/</code></h3>
+<p>O que não muda quando se acrescenta uma fonte.</p>
+
+<table>
+<tr><th style="width:22%">Módulo</th><th class="num" style="width:8%">Linhas</th><th>Responsabilidade</th></tr>
+<tr><td><code>record.py</code></td><td class="num">118</td><td>Define <code>DocumentRecord</code>, o contrato entre a Etapa 1 e todo o resto. Também canonicaliza URLs e calcula <em>hashes</em>.</td></tr>
+<tr><td><code>prefilter.py</code></td><td class="num">198</td><td>Carrega o léxico, normaliza texto (minúsculas, sem acentos, pontuação virando espaço) e pontua documentos em faixas. Contém também o amostrador determinístico de negativos.</td></tr>
+<tr><td><code>fetcher.py</code></td><td class="num">402</td><td>O único downloader do sistema. <code>robots.txt</code>, limite de taxa, <em>backoff</em>, requisições condicionais, validação por <em>magic bytes</em>, tetos de tamanho e de tempo, <em>blocklist</em>.</td></tr>
+<tr><td><code>frontier.py</code></td><td class="num">283</td><td>Fila de <strong>documentos</strong> em SQLite: estado, deduplicação, retomada, e o registro de conteúdos com suas procedências.</td></tr>
+<tr><td><code>store.py</code></td><td class="num">93</td><td>Armazenamento endereçado por conteúdo e escrita do manifesto e dos rejeitados.</td></tr>
+<tr><td><code>pipeline.py</code></td><td class="num">264</td><td>Orquestra: descoberta → pré-filtro → fila → <em>fetch</em> → armazenamento. Contabiliza as métricas.</td></tr>
+</table>
+
+<h4>Detalhes que valem entender</h4>
+<p><strong>Validação por <em>magic bytes</em>, não por <code>Content-Type</code>.</strong> Um caso real: a API do NTRS devolve texto extraído com <code>Content-Type: text/plain</code>, mas o conteúdo às vezes é XHTML produzido pelo Apache Tika. Outro caso: servidores anunciam "application/pdf" e devolvem uma página de erro HTML com código 200. Só os bytes dizem a verdade.</p>
+<p><strong>Teto de tempo além do teto de tamanho.</strong> O <em>timeout</em> da biblioteca HTTP é por operação de leitura: um servidor que envia bytes em conta-gotas nunca o dispara. Isso travou uma coleta por 20 minutos em 10 documentos, e por isso existe um limite de relógio de parede para o corpo inteiro.</p>
+
+<h3>5.2 Motor de rastreamento — <code>crawler/engine/</code></h3>
+<p>O <em>crawler</em> genérico. É a parte maior e mais nova do sistema.</p>
+
+<table>
+<tr><th style="width:22%">Módulo</th><th class="num" style="width:8%">Linhas</th><th>Responsabilidade</th></tr>
+<tr><td><code>spec.py</code></td><td class="num">170</td><td><code>SourceSpec</code> e <code>Scope</code> — o contrato YAML de uma fonte: sementes, limites, estratégia, papel, orçamento.</td></tr>
+<tr><td><code>urlfrontier.py</code></td><td class="num">223</td><td>Fila de <strong>URLs</strong> em SQLite, ordenada por prioridade e profundidade. Suporta promoção: uma URL reencontrada por um caminho melhor sobe na fila.</td></tr>
+<tr><td><code>linkscorer.py</code></td><td class="num">166</td><td>Pontuação semântica de links — o coração do rastreamento focado.</td></tr>
+<tr><td><code>extract.py</code></td><td class="num">284</td><td>Extração de links (com âncora e contexto) e de metadados estruturados do <code>&lt;head&gt;</code>.</td></tr>
+<tr><td><code>sitemap.py</code></td><td class="num">156</td><td>Descoberta e leitura de <em>sitemaps</em>, incluindo índices aninhados, com orçamento e desistência.</td></tr>
+<tr><td><code>traps.py</code></td><td class="num">124</td><td>Canonicalização de URL e detecção de armadilhas.</td></tr>
+<tr><td><code>crawler.py</code></td><td class="num">451</td><td>O laço que junta tudo, mais a contabilidade das métricas.</td></tr>
+<tr><td><code>renderer.py</code></td><td class="num">126</td><td>Playwright, ativado apenas nas fontes que declaram precisar.</td></tr>
+</table>
+
+<h4>O que o <code>extract.py</code> faz de mais valioso</h4>
+<p>Repositórios institucionais quase sempre publicam metadados estruturados no cabeçalho HTML. O sistema lê quatro padrões, em ordem de qualidade:</p>
+<ol>
+  <li><strong>Highwire Press</strong> (<code>citation_title</code>, <code>citation_author</code>, <code>citation_pdf_url</code>...) — o padrão que o Google Scholar consome. O mais completo.</li>
+  <li><strong>Dublin Core</strong> (<code>DC.title</code>, <code>DC.creator</code>...).</li>
+  <li><strong>OpenGraph</strong> (<code>og:title</code>, <code>og:description</code>).</li>
+  <li><strong>JSON-LD schema.org</strong>.</li>
+</ol>
+<p><strong>É isto que equipara uma fonte HTML a uma API.</strong> Sem ler essas tags, o <em>crawler</em> traria um PDF sem título, sem autor e sem data — inútil para o corpus.</p>
+
+<h3>5.3 Adaptadores — <code>crawler/adapters/</code></h3>
+<table>
+<tr><th style="width:22%">Módulo</th><th class="num" style="width:8%">Linhas</th><th>Responsabilidade</th></tr>
+<tr><td><code>base.py</code></td><td class="num">37</td><td>A interface comum: todo adaptador tem um método <code>discover()</code> que produz <code>DocumentRecord</code>.</td></tr>
+<tr><td><code>ntrs.py</code></td><td class="num">242</td><td>Cliente da API da NASA, com particionamento por ano e o job semanal de sincronização exigido pelos termos de uso.</td></tr>
+<tr><td><code>rosap.py</code></td><td class="num">197</td><td>Colhedor OAI-PMH do Departamento de Transportes dos EUA.</td></tr>
+<tr><td><code>crawl.py</code></td><td class="num">64</td><td>Embrulha o motor de rastreamento na mesma interface dos demais.</td></tr>
+</table>
+
+<div class="box alerta">
+<span class="titulo">Três armadilhas reais da API do NTRS, verificadas contra o serviço</span>
+<ul>
+  <li><strong>O parâmetro de paginação é <code>page.from</code>, não <code>from</code>.</strong> O parâmetro errado é ignorado <em>em silêncio</em> e o servidor devolve sempre a primeira página — produziria um laço infinito colhendo os mesmos registros, sem erro em log nenhum.</li>
+  <li><strong>Parâmetros desconhecidos não geram erro.</strong> Um código HTTP 200 não prova que o filtro foi aplicado. Cada filtro usado foi validado observando mudança na contagem total de resultados.</li>
+  <li><strong>Existe um teto rígido de 10.000 resultados por consulta</strong>, sobre a <em>soma</em> de posição e tamanho de página. Sem particionar as consultas por faixa de ano, a cauda de qualquer busca grande se perde em silêncio — perda de cobertura que não aparece em nenhum log.</li>
+</ul>
+</div>
+
+<h3>5.4 Interface de linha de comando — <code>crawler/cli.py</code></h3>
+<p>305 linhas que expõem cinco comandos: <code>discover</code>, <code>harvest</code>, <code>experiment</code>, <code>retry-failed</code>, <code>report</code> e <code>sync-ntrs</code>. A seção 14 traz a referência completa.</p>
+
+<div class="quebra"></div>
+<h2>6. Conceitos que costumam confundir</h2>
+
+<h3>6.1 Por que existem duas filas</h3>
+<p>Esta é a distinção conceitual mais importante do sistema, e a mais fácil de confundir. São duas coisas diferentes com nomes parecidos:</p>
+
+<table>
+<tr><th style="width:26%"></th><th style="width:37%">Fila de URLs<br><code>engine/urlfrontier.py</code></th><th>Fila de documentos<br><code>core/frontier.py</code></th></tr>
+<tr><td><strong>Guarda</strong></td><td>Endereços ainda não visitados</td><td>Documentos candidatos já identificados</td></tr>
+<tr><td><strong>Pergunta que responde</strong></td><td>"Qual página visitar agora?"</td><td>"Qual arquivo baixar agora?"</td></tr>
+<tr><td><strong>Ordenada por</strong></td><td>Prioridade do link, depois profundidade</td><td>Pontuação léxica do documento</td></tr>
+<tr><td><strong>Existe para</strong></td><td>Só o rastreamento HTML</td><td>Todas as fontes, inclusive as de API</td></tr>
+<tr><td><strong>Arquivo</strong></td><td><code>urlfrontier.sqlite</code></td><td><code>frontier.sqlite</code></td></tr>
+</table>
+
+<p>Numa fonte de API como o NTRS, a primeira fila nem chega a existir — não há navegação. Numa fonte rastreada como a FAA, as duas trabalham em sequência: a de URLs conduz a travessia, e o que ela identifica como documento alimenta a de documentos.</p>
+
+<h3>6.2 Três identidades diferentes</h3>
+<p>O sistema distingue três noções de "o mesmo":</p>
+<ol>
+  <li><strong>Identidade da descoberta</strong> — o par <code>(fonte, id nativo)</code>. Evita reprocessar o mesmo registro da mesma fonte. Ex.: <code>ntrs:20200001712</code>.</li>
+  <li><strong>Identidade do conteúdo</strong> — o <strong>SHA-256 do arquivo</strong>. É o que deduplica <em>entre</em> repositórios: o mesmo ConOps vindo da FAA, do ROSA P e do NTRS vira um único arquivo em disco, com as três procedências registradas.</li>
+  <li><strong>Endereço</strong> — a URL. <strong>Nunca é usada como identidade.</strong> No portal Liferay da ESA a URL carrega um identificador único e um <em>timestamp</em>, e muda toda vez que o documento é reeditado. Usá-la como chave faria o mesmo documento ser contado várias vezes.</li>
+</ol>
+
+<h3>6.3 Descobrir ≠ baixar</h3>
+<p>A descoberta produz uma <em>lista de candidatos com metadados</em>; a coleta produz <em>arquivos em disco</em>. A separação existe porque as duas têm custos completamente diferentes: no ROSA P, varrer 4.000 metadados levou 40 segundos e permitiu <strong>não baixar 3.583 PDFs</strong> irrelevantes.</p>
+
+<div class="quebra"></div>
+<h2>7. O pré-filtro léxico e as quatro faixas</h2>
+<p>O pré-filtro decide, <strong>a partir do metadado</strong>, se vale baixar o arquivo. É onde se ganha ordem de grandeza em tempo e banda.</p>
+
+<h3>O que o léxico contém</h3>
+<table>
+<tr><th style="width:26%">Categoria</th><th>Conteúdo e função</th></tr>
+<tr><td><strong>Termos fortes</strong></td><td>Nomes institucionais do artefato: <em>concept of operations</em>, <em>ConOps</em>, <em>operational concept</em>, <em>OpsCon</em>, <em>mission operations concept</em>, <em>concept of employment</em>. No <strong>título</strong>, levam à faixa <code>strong</code>.</td></tr>
+<tr><td><strong>Termos moderados</strong></td><td>Sugerem concepção sem nomear o artefato: <em>operational scenario</em>, <em>modes of operation</em>, <em>stakeholder needs</em>. Nunca elevam sozinhos.</td></tr>
+<tr><td><strong>Assinatura estrutural</strong></td><td>Títulos de seção canônicos das normas <strong>ISO/IEC/IEEE 29148:2011</strong> e <strong>ANSI/AIAA G-043A-2012</strong>: <em>current system or situation</em>, <em>justification for and nature of changes</em>, <em>summary of impacts</em>. Sinal muito mais específico que o termo isolado — raramente aparecem juntos fora de um documento de concepção real.</td></tr>
+<tr><td><strong>Marcadores adversariais</strong></td><td>Contêm sinal forte mas <strong>não</strong> são documentos de concepção: <em>review checklist</em>, <em>lessons learned</em>, <em>meeting minutes</em>, <em>progress report</em>. Rebaixam de <code>strong</code> para <code>weak</code> e marcam para revisão manual.</td></tr>
+<tr><td><strong>Vocabulário de safety</strong></td><td><em>STPA</em>, <em>STAMP</em>, <em>hazard analysis</em>, <em>unsafe control action</em>. Não indica ConOps — serve para identificar os negativos difíceis.</td></tr>
+</table>
+
+<h3>As quatro faixas</h3>
+<table>
+<tr><th style="width:19%">Faixa</th><th style="width:36%">Condição</th><th style="width:18%">Ação</th><th class="num">Corpus atual</th></tr>
+<tr><td><code>strong</code></td><td>Sinal forte no título, sem marcador adversarial</td><td>Baixar sempre</td><td class="num">92</td></tr>
+<tr><td><code>weak</code></td><td>Sinal apenas no resumo/assuntos, ou <code>strong</code> rebaixado por marcador adversarial</td><td>Baixar e marcar para revisão</td><td class="num">224</td></tr>
+<tr><td><code>hard_negative</code></td><td>Fonte declarada como fornecedora de negativos difíceis (MIT PSAS)</td><td>Coletar <strong>tudo</strong>, sem amostrar</td><td class="num">627</td></tr>
+<tr><td><code>negative_sample</code></td><td>Sem sinal, em fonte comum</td><td>Amostrar ~1 em 8, com teto por fonte</td><td class="num">856</td></tr>
+</table>
+
+<div class="box">
+<span class="titulo">Por que coletar a classe negativa não é opcional</span>
+<p>O objetivo final é um <strong>classificador binário</strong>. Sem exemplos negativos não há como calcular <strong>precisão</strong> (quantos dos classificados como ConOps realmente são), <strong>recall</strong> (quantos dos ConOps existentes foram encontrados) nem <strong>F1</strong> (a média harmônica dos dois). Sem essas métricas, a Etapa 5 vira demonstração em vez de avaliação.</p>
+<p>Há três tipos de negativo, em ordem crescente de valor:</p>
+<ul>
+  <li><strong>Fáceis</strong> — documentos aleatórios sem nenhum sinal.</li>
+  <li><strong>Difíceis</strong> — o acervo MIT PSAS: denso em terminologia de segurança de sistemas, mas não são documentos de concepção.</li>
+  <li><strong>Adversariais</strong> — contêm o termo "ConOps" no título mas são <em>checklists</em>, atas ou lições aprendidas. Os mais informativos de todos.</li>
+</ul>
+<p>A amostragem é <strong>determinística</strong>: usa uma semente fixa combinada ao identificador do documento, de modo que reexecutar a coleta seleciona exatamente os mesmos negativos. Isso é requisito de reprodutibilidade.</p>
+</div>
+
+<div class="quebra"></div>
+<h2>8. O rastreamento focado (<em>Web Crawling semântico</em>)</h2>
+<p>A introdução do projeto de IC menciona "<em>Web Crawling</em> semântico". A implementação literal disso na literatura é o <strong>focused crawling</strong> (Chakrabarti et al., 1999): em vez de varrer o site em largura, estima-se a relevância de cada link <strong>antes de segui-lo</strong> e expande-se primeiro o que promete mais.</p>
+
+<h3>As três fontes de evidência</h3>
+<table>
+<tr><th style="width:22%">Evidência</th><th class="num" style="width:8%">Peso</th><th>Justificativa</th></tr>
+<tr><td><strong>Tokens da URL</strong></td><td class="num">1,00</td><td>O mais confiável: <code>/uam-conops-2.0.pdf</code> diz mais que qualquer âncora, porque quem nomeia um arquivo raramente mente. Exige decodificar o <em>percent-encoding</em> — sem isso, <code>%20</code> esconderia a frase inteira.</td></tr>
+<tr><td><strong>Texto da âncora</strong></td><td class="num">0,70</td><td>Texto humano, mas nem sempre informativo: "Concept of Operations v2" é explícito; "clique aqui" não diz nada.</td></tr>
+<tr><td><strong>Contexto ao redor</strong></td><td class="num">0,25</td><td>Salva quando a âncora é pobre: um "PDF" dentro de um parágrafo sobre concepção operacional vale mais que o mesmo "PDF" numa lista de atas de reunião.</td></tr>
+</table>
+
+<p>A esses somam-se três ajustes: <strong>bônus</strong> para links que apontam a documentos (são o alvo, não um passo intermediário), <strong>penalidade por profundidade</strong> (impede afundar num único ramo) e <strong>penalidade para ruído estrutural</strong> (<code>/login</code>, <code>/newsroom</code>, <code>/careers</code>).</p>
+
+<h3>Como as duas estratégias convivem no mesmo código</h3>
+<p>A única diferença entre <code>focused</code> e <code>bfs</code> é o pontuador estar ligado. Com ele desligado, toda prioridade vale zero e a ordenação da fila (<em>prioridade decrescente, depois profundidade crescente</em>) degenera exatamente em busca em largura.</p>
+<p>Isso é deliberado: <strong>comparar duas estratégias só tem valor se forem idênticas em tudo o mais</strong>.</p>
+
+<h3>Resultado medido — FAA, 4 de agosto de 2026</h3>
+<p>Mesmo orçamento, mesmas sementes, <em>sitemap</em> desligado (para que a comparação medisse navegação, e não a lista pronta que o <em>sitemap</em> entrega a ambas):</p>
+
+<table>
+<tr><th>Métrica</th><th class="num" style="width:18%">BFS</th><th class="num" style="width:18%">Focado</th></tr>
+<tr><td>Páginas baixadas</td><td class="num">79</td><td class="num">79</td></tr>
+<tr><td>Links vistos</td><td class="num">15.408</td><td class="num">15.507</td></tr>
+<tr><td>Documentos encontrados</td><td class="num">256</td><td class="num">292</td></tr>
+<tr><td><strong>Documentos relevantes</strong></td><td class="num"><strong>2</strong></td><td class="num"><strong>4</strong></td></tr>
+<tr><td><strong>Harvest rate</strong></td><td class="num"><strong>0,0253</strong></td><td class="num"><strong>0,0506</strong></td></tr>
+</table>
+<p class="legenda">Ganho de 2,0× no rendimento por página baixada.</p>
+
+<div class="box alerta">
+<span class="titulo">Ressalva honesta, a registrar no relatório</span>
+<p>Os números absolutos são <strong>pequenos</strong>: 2 contra 4 documentos relevantes. O resultado é <em>sugestivo</em>, não conclusivo — n=2 versus n=4 não sustenta afirmação estatística. Para o relatório final, é necessário repetir com orçamento de várias centenas de páginas e em mais de uma fonte.</p>
+<p>Vale também registrar o contraexemplo observado em teste controlado: quando o ramo relevante é o <strong>primeiro</strong> link da página, o BFS empata com o focado. O ganho aparece quando o conteúdo relevante está <em>enterrado</em> — que é o caso real dos portais institucionais.</p>
+</div>
+
+<h3>Evolução prevista para a Etapa 4</h3>
+<p>Quando a Etapa 4 produzir os <em>embeddings</em> BERT, este mesmo componente pode trocar a pontuação léxica por <strong>similaridade vetorial</strong> entre o contexto do link e um protótipo de ConOps, sem alterar o motor — a interface do pontuador foi desenhada para essa substituição. Isso fecha um ciclo entre as etapas e reaproveita o modelo em duas frentes.</p>
+
+<div class="quebra"></div>
+<h2>9. Inventário de fontes e situação de cada uma</h2>
+
+<table>
+<tr><th style="width:16%">Fonte</th><th style="width:16%">Via</th><th style="width:12%">Situação</th><th>Observações</th></tr>
+<tr>
+  <td><strong>NTRS</strong><br>NASA STI</td><td>API REST</td><td><span class="pill ok">COLETANDO</span></td>
+  <td>295 candidatos. <strong>87% dos documentos vêm com texto já extraído</strong> pela própria NASA, o que dispensa a Etapa 2 para eles. Fonte âncora do corpus.</td>
+</tr>
+<tr>
+  <td><strong>ROSA P</strong><br>US DOT</td><td>OAI-PMH</td><td><span class="pill ok">COLETANDO</span></td>
+  <td>417 candidatos. Acervo em domínio público, coleta incremental nativa. Contém relatórios da FAA, NHTSA e FHWA.</td>
+</tr>
+<tr>
+  <td><strong>MIT PSAS</strong></td><td>Rastreamento</td><td><span class="pill ok">COLETADO</span></td>
+  <td>703 documentos, todos <em>hard negatives</em>. Não contém ConOps — contém apresentações <em>sobre</em> STPA. Papel duplo: vocabulário para a Etapa 3 e negativos difíceis para validar a Etapa 5.</td>
+</tr>
+<tr>
+  <td><strong>FAA</strong></td><td>Sitemap + rastreamento</td><td><span class="pill ok">COLETANDO</span></td>
+  <td>383 candidatos. O <em>sitemap</em> entregou 4.175 URLs. Requer exceção de User-Agent (ver seção 10).</td>
+</tr>
+<tr>
+  <td><strong>ESA Cosmos</strong></td><td>Rastreamento</td><td><span class="pill parc">POUCO MATERIAL</span></td>
+  <td>O rastreamento funciona, mas o material público é escasso: a página do Euclid tem 2 subpáginas e os links de documento são imagens. A documentação de projeto está no Content Server, que exige autenticação e está em <em>blocklist</em>.</td>
+</tr>
+<tr>
+  <td><strong>ESA EOF</strong></td><td>Rastreamento + Playwright</td><td><span class="pill parc">SÓ METADADO</span></td>
+  <td>A renderização JavaScript funciona e a categoria "Operations concept" lista exatamente os 2 alvos. Porém as <em>landing pages</em> <strong>não contêm link para arquivo algum</strong> — os PDFs ficam atrás do visualizador e da área de login. Serve como fonte de metadado, não de arquivo.</td>
+</tr>
+<tr>
+  <td><strong>DTIC</strong></td><td>Sitemap autorizado</td><td><span class="pill nao">INDISPONÍVEL</span></td>
+  <td>A DTIC <em>autoriza explicitamente</em> a coleta pelo <em>sitemap</em>, mas o host inteiro está redirecionando para uma página de manutenção. Nenhuma técnica de cliente contorna um servidor desligado — é necessário reverificar periodicamente.</td>
+</tr>
+<tr>
+  <td><strong>CORDIS</strong></td><td><em>Bulk</em> CSV + rastreamento</td><td><span class="pill nao">NÃO IMPLEMENTADO</span></td>
+  <td>O <code>SourceSpec</code> está escrito, mas o adaptador que baixa e filtra os <em>dumps</em> CSV ainda não. É a maior lacuna funcional do sistema hoje.</td>
+</tr>
+</table>
+
+<h3>Estado do corpus</h3>
+<table>
+<tr><th>Indicador</th><th class="num" style="width:24%">Valor</th></tr>
+<tr><td>Candidatos descobertos</td><td class="num">1.799</td></tr>
+<tr><td>Documentos baixados e armazenados</td><td class="num">213</td></tr>
+<tr><td>Volume em disco</td><td class="num">157 MB</td></tr>
+<tr><td>URLs rastreadas (todas as fontes)</td><td class="num">3.422</td></tr>
+<tr><td>Falhas de download pendentes</td><td class="num">1</td></tr>
+<tr><td>Descartados por controle de exportação</td><td class="num">0</td></tr>
+<tr><td>Testes automatizados</td><td class="num">124</td></tr>
+</table>
+
+<div class="quebra"></div>
+<h2>10. Conformidade legal e ética</h2>
+<p>Seção obrigatória num projeto com financiamento FAPESP e parceria industrial (Embraer).</p>
+
+<table>
+<tr><th style="width:20%">Fonte</th><th style="width:38%">Obrigação verificada</th><th>Implementação</th></tr>
+<tr><td><strong>NTRS</strong></td><td>Citar a fonte; consultar as redistribuições semanalmente e remover documentos retirados; preferir a URL de citação a redistribuir texto integral</td><td>Comando <code>sync-ntrs</code> e campo <code>withdrawn_at</code> no manifesto</td></tr>
+<tr><td><strong>DTIC</strong></td><td>Apenas material com <em>Distribution Statement A</em>; não tentar o R&amp;E Gateway (exige CAC/PIV)</td><td><code>rndgateway.dtic.mil</code> em <em>blocklist</em></td></tr>
+<tr><td><strong>ESA Cosmos</strong></td><td><code>dms.cosmos.esa.int</code> exige autenticação</td><td><em>Blocklist</em> explícita — não se tenta acesso em hipótese alguma</td></tr>
+<tr><td><strong>ROSA P</strong></td><td>Domínio público</td><td>Sem restrição</td></tr>
+<tr><td><strong>MIT PSAS</strong></td><td>Material de workshop, direitos dos autores</td><td>Uso interno de pesquisa; não redistribuir</td></tr>
+<tr><td><strong>Todas</strong></td><td>Controle de exportação ITAR/EAR</td><td>Descarte antes da fila, com contagem registrada</td></tr>
+</table>
+
+<h3>Postura geral</h3>
+<p>O corpus é <strong>interno ao projeto</strong>, para treinamento e avaliação. O que se publica são <strong>metadados, métricas e identificadores persistentes</strong> (DOI, id NTRS, número AD) — nunca os PDFs. Isso resolve simultaneamente os termos de uso do NTRS e o risco de direitos autorais.</p>
+
+<h3>A exceção de User-Agent</h3>
+<p>FAA e DTIC estão atrás de um WAF que responde <strong>403 a qualquer User-Agent que não seja exatamente o de um navegador</strong>. Um UA híbrido (navegador com identificação acadêmica anexada) também é bloqueado — não há meio-termo técnico.</p>
+<p>Isso derruba a premissa comum de que "administradores toleram bots identificados de universidades": para sites <code>.gov</code> atrás de Akamai, o efeito é o inverso.</p>
+
+<div class="box ok">
+<span class="titulo">Decisão do projeto e seus fundamentos</span>
+<p>Usar User-Agent de navegador <strong>restrito a <code>faa.gov</code> e <code>apps.dtic.mil</code></strong>, a 1 requisição a cada 3–4 segundos. Fundamentos:</p>
+<ol>
+  <li>São <strong>documentos públicos de governo</strong>, publicados com a finalidade de acesso público. Não há conteúdo restrito nem contorno de autenticação.</li>
+  <li>A regra do WAF é <strong>mitigação genérica de bots</strong> aplicada pelo provedor de CDN, não política declarada da instituição.</li>
+  <li>A DTIC <strong>autoriza explicitamente</strong> a coleta do seu acervo, o que torna o bloqueio um efeito colateral da CDN.</li>
+  <li>A carga é desprezível, com orçamento fechado por fonte.</li>
+</ol>
+<p><strong>O argumento mais forte, verificado:</strong> com o User-Agent de navegador, o <code>robots.txt</code> da FAA <strong>passa a ser legível</strong> — e o sistema passa a respeitá-lo, o que antes era tecnicamente impossível. Seu conteúdo é um <code>robots.txt</code> padrão de Drupal que proíbe <code>/core/</code>, <code>/profiles/</code> e <code>/admin/</code>, e <strong>permite exatamente os caminhos que o projeto rastreia</strong>.</p>
+<p>Ou seja: a política de rastreamento declarada pela FAA autoriza esta coleta, e o WAF era o que impedia tanto a coleta quanto a leitura da política que a permite.</p>
+</div>
+
+<div class="quebra"></div>
+<h2>11. O que já está pronto — pontos positivos</h2>
+
+<h3>Funcionalidade</h3>
+<ul>
+  <li><strong>Três vias de acesso funcionando:</strong> API dedicada (NTRS), protocolo padrão (OAI-PMH do ROSA P, <em>sitemaps</em>) e rastreamento HTML genérico.</li>
+  <li><strong>Adicionar uma fonte custa um arquivo YAML</strong> — nenhum código Python. Há 8 <code>SourceSpec</code> escritos.</li>
+  <li><strong>Renderização JavaScript</strong> disponível e opcional por fonte, com Playwright.</li>
+  <li><strong>Rastreamento focado implementado e medido</strong>, com linha de base BFS para comparação.</li>
+</ul>
+
+<h3>Robustez</h3>
+<ul>
+  <li><strong>Idempotência verificada em produção:</strong> reexecutar a descoberta devolveu "377 vistos, 0 novos".</li>
+  <li><strong>Retomada após interrupção:</strong> o estado vive em SQLite; uma coleta interrompida continua de onde parou.</li>
+  <li><strong>Deduplicação entre repositórios</strong> por SHA-256, com todas as procedências preservadas.</li>
+  <li><strong>Detecção de armadilhas</strong> de calendário, busca facetada, sessão e caminhos repetidos.</li>
+  <li><strong>Orçamentos em três níveis:</strong> por fonte, por host e por <em>sitemap</em>, com desistência automática quando o rendimento é baixo.</li>
+  <li><strong>Validação de conteúdo por <em>magic bytes</em></strong>, imune a cabeçalhos <code>Content-Type</code> incorretos.</li>
+</ul>
+
+<h3>Qualidade e reprodutibilidade</h3>
+<ul>
+  <li><strong>124 testes automatizados</strong> que não tocam a rede — usam respostas reais gravadas. Reproduzir a coleta não depende de os servidores estarem no ar.</li>
+  <li><strong>Quatro bugs de campo travados por teste de regressão</strong> (ver detalhes abaixo).</li>
+  <li><strong>Configuração versionada em YAML</strong>, métricas datadas em <code>reports/</code>, manifesto JSONL com procedência completa.</li>
+  <li><strong>Amostragem determinística</strong> da classe negativa.</li>
+</ul>
+
+<h3>Eficiência medida</h3>
+<ul>
+  <li><strong>O pré-filtro evita a maior parte do tráfego:</strong> no ROSA P, 4.000 metadados varridos em 40 segundos permitiram <em>não</em> baixar 3.583 PDFs.</li>
+  <li><strong>87% dos documentos do NTRS chegam com texto já extraído</strong>, ocupando 13 MB — os mesmos em PDF ocupariam ordens de grandeza mais e exigiriam extração na Etapa 2.</li>
+  <li><strong>Rastreamento focado dobrou o rendimento</strong> na FAA com orçamento idêntico.</li>
+</ul>
+
+<h3>Bugs encontrados apenas contra sites reais</h3>
+<p>Vale registrar porque ilustram a diferença entre código que compila e código que funciona:</p>
+<ol>
+  <li><strong><code>href</code> malformado derrubava o rastreamento inteiro.</strong> Um <em>placeholder</em> de template (<code>[auth_url]</code>) fazia a biblioteca tentar interpretá-lo como endereço IPv6 e levantar exceção. Um link ruim numa página custava a coleta inteira da fonte.</li>
+  <li><strong>Título vazando de página de índice.</strong> Os 40 PDFs de uma página de listagem herdavam todos o título da listagem. Isso corromperia o metadado do corpus e contaminaria a avaliação da Etapa 5.</li>
+  <li><strong><code>http://</code> e <code>https://</code> contados como documentos distintos</strong>, dobrando a contagem e gastando o orçamento duas vezes no mesmo arquivo.</li>
+  <li><strong>Relevância julgada cedo demais.</strong> No ROSA P o arquivo se chama <code>dot_78914_DS1.pdf</code> e não carrega sinal algum — o título está na <em>landing page</em>. Julgar antes de resolver o metadado subestimava tudo.</li>
+</ol>
+
+<div class="quebra"></div>
+<h2>12. Limitações e pontos negativos</h2>
+<p>Registro honesto do que ainda não funciona ou funciona mal.</p>
+
+<h3>12.1 Lacunas funcionais</h3>
+<table>
+<tr><th style="width:30%">Lacuna</th><th style="width:14%">Gravidade</th><th>Detalhe</th></tr>
+<tr>
+  <td><strong>Adaptador CORDIS não implementado</strong></td><td><span class="pill nao">ALTA</span></td>
+  <td>O <code>SourceSpec</code> existe, o código não. É a única fonte planejada sem implementação, e representa a diversidade europeia do corpus (projetos SESAR JU, ConOps de gerenciamento de tráfego aéreo).</td>
+</tr>
+<tr>
+  <td><strong>Não existe <em>gold set</em></strong></td><td><span class="pill nao">ALTA</span></td>
+  <td>Sem um conjunto de referência rotulado manualmente, não é possível medir a <strong>cobertura</strong> (<code>recall@gold</code>) — a métrica-chave da Etapa 1. Hoje só se sabe quantos documentos foram coletados, não que fração dos existentes foi encontrada.</td>
+</tr>
+<tr>
+  <td><strong>Precisão do pré-filtro não medida</strong></td><td><span class="pill parc">MÉDIA</span></td>
+  <td>Não se sabe que fração dos <code>strong</code> é realmente ConOps, nem quanto dos <code>weak</code> se aproveita. Exigiria revisão manual de ~100 itens de cada faixa.</td>
+</tr>
+<tr>
+  <td><strong>Experimento com amostra pequena</strong></td><td><span class="pill parc">MÉDIA</span></td>
+  <td>O ganho de 2,0× do rastreamento focado baseia-se em 4 contra 2 documentos relevantes. Sugestivo, não conclusivo.</td>
+</tr>
+<tr>
+  <td><strong>Etapa 2 ausente</strong></td><td><span class="pill parc">MÉDIA</span></td>
+  <td>Fora do escopo deste repositório, mas é a dependência imediata: 13% dos documentos do NTRS e todos os PDFs das demais fontes precisam de extração de texto.</td>
+</tr>
+</table>
+
+<h3>12.2 Limitações técnicas</h3>
+<ul>
+  <li><strong>Sem paralelismo.</strong> A configuração prevê um campo de concorrência por domínio, mas o downloader é sequencial. Coletar milhares de documentos leva horas que poderiam ser minutos. O SQLite com escritor único também limita quanto se pode paralelizar sem mudar a arquitetura de estado.</li>
+  <li><strong>Corpo inteiro carregado em memória.</strong> O teto de 60 MB por arquivo protege, mas um documento grande ocupa toda a sua memória durante o download em vez de ser gravado em fluxo.</li>
+  <li><strong>Deduplicação apenas exata.</strong> Dois PDFs do mesmo documento com um byte de diferença (metadado de geração, marca d'água, versão reexportada) contam como documentos distintos. Falta deduplicação aproximada por similaridade.</li>
+  <li><strong>Sem detecção de PDF escaneado.</strong> Um PDF que contém só imagens passará adiante e produzirá texto vazio na Etapa 2, sem aviso.</li>
+  <li><strong>Pontuador de links é léxico, não semântico.</strong> "Web Crawling semântico" está implementado na estrutura (o pontuador existe e funciona), mas a pontuação ainda é casamento de termos, não similaridade vetorial. A ponte para a Etapa 4 está desenhada, não construída.</li>
+  <li><strong>Cobertura de testes não medida formalmente.</strong> São 124 testes e a proporção de código de teste para produção é boa (1.716 para 3.903 linhas), mas não há relatório de cobertura.</li>
+  <li><strong>O <em>job</em> semanal do NTRS não está agendado.</strong> O comando existe, mas depende de execução manual — e os termos de uso o exigem periodicamente.</li>
+</ul>
+
+<h3>12.3 Limitações das fontes (fora do controle do projeto)</h3>
+<ul>
+  <li><strong>DTIC indisponível</strong> por manutenção do servidor. Sem previsão.</li>
+  <li><strong>ESA EOF não expõe os arquivos</strong> publicamente — só as fichas de metadado.</li>
+  <li><strong>ESA Cosmos tem pouco material público</strong>; a documentação real exige autenticação.</li>
+  <li><strong>Busca do ROSA P bloqueada</strong> para clientes automatizados, embora o OAI-PMH funcione (e seja a via correta de qualquer forma).</li>
+</ul>
+
+<div class="quebra"></div>
+<h2>13. Próximos passos priorizados</h2>
+<p>Ordenados por relação entre impacto no projeto de IC e esforço.</p>
+
+<h3>Prioridade 1 — Desbloqueiam a avaliação</h3>
+<ol>
+  <li>
+    <strong>Construir o <em>gold set</em>.</strong> Curar manualmente 50–80 documentos rotulados: ~40 ConOps confirmados, ~20 quase-ConOps (requisitos, descrições de sistema — a fronteira difícil) e ~20 negativos claros.
+    <br><em>Por que primeiro:</em> é o que permite medir <code>recall@gold</code>, a métrica-chave da Etapa 1. E serve de referência para as Etapas 1, 3 e 5 — investimento que se paga três vezes. Exige julgamento humano; não pode ser automatizado.
+  </li>
+  <li>
+    <strong>Medir a precisão do pré-filtro.</strong> Revisar manualmente 100 itens da faixa <code>strong</code> e 100 da <code>weak</code>.
+    <br><em>Por quê:</em> transforma "coletei 316 documentos" em "coletei 316 documentos com X% de precisão na faixa forte" — a diferença entre relatório descritivo e resultado.
+  </li>
+  <li>
+    <strong>Repetir o experimento focado vs BFS com orçamento grande</strong> (várias centenas de páginas) e em mais de uma fonte.
+    <br><em>Por quê:</em> o resultado atual é sugestivo mas frágil. Com amostra maior vira resultado publicável.
+  </li>
+</ol>
+
+<h3>Prioridade 2 — Completam a cobertura de fontes</h3>
+<ol start="4">
+  <li>
+    <strong>Implementar o adaptador <em>bulk</em> do CORDIS.</strong> Baixar os <em>dumps</em> CSV mensais, filtrar <em>offline</em> por programa (SESAR JU e <em>clusters</em> aeroespaciais) e só então baixar os PDFs aprovados.
+    <br><em>Por quê:</em> é a única fonte planejada sem código, e traz diversidade europeia — importante para a validade da Etapa 5.
+  </li>
+  <li>
+    <strong>Reverificar a DTIC periodicamente</strong> e coletar assim que sair da manutenção.
+  </li>
+  <li>
+    <strong>Adicionar EASA e NHTSA</strong> como <code>SourceSpec</code>, agora que o motor genérico existe. Custo: um YAML cada.
+  </li>
+</ol>
+
+<h3>Prioridade 3 — Eficiência</h3>
+<ol start="7">
+  <li>
+    <strong>Paralelismo por domínio.</strong> Baixar de várias fontes simultaneamente, respeitando o limite de taxa de cada uma independentemente.
+    <br><em>Ganho estimado:</em> de horas para minutos numa coleta completa. Requer revisar o acesso concorrente ao SQLite.
+  </li>
+  <li>
+    <strong>Gravação em fluxo</strong> em vez de carregar o corpo inteiro em memória.
+  </li>
+  <li>
+    <strong>Deduplicação aproximada</strong> por SimHash ou MinHash sobre o texto, para pegar reexportações do mesmo documento.
+  </li>
+  <li>
+    <strong>Detecção de PDF escaneado</strong> na ingestão — contar caracteres extraídos por página e sinalizar os que precisarão de OCR.
+  </li>
+</ol>
+
+<h3>Prioridade 4 — Ponte com as etapas seguintes</h3>
+<ol start="11">
+  <li>
+    <strong>Pontuador de links por <em>embeddings</em>.</strong> Assim que a Etapa 4 produzir o modelo BERT, substituir a pontuação léxica por similaridade vetorial entre o contexto do link e um protótipo de ConOps.
+    <br><em>Por quê:</em> é o que torna o "<em>Web Crawling</em> semântico" semântico de fato, fecha um ciclo entre as etapas e reaproveita o modelo. Bom material de artigo.
+  </li>
+  <li>
+    <strong>Agendar o <em>job</em> semanal do NTRS</strong> — exigência dos termos de uso, hoje dependente de execução manual.
+  </li>
+  <li>
+    <strong>Relatório de cobertura de testes</strong> e integração contínua, se o projeto for para repositório compartilhado.
+  </li>
+</ol>
+
+<div class="box">
+<span class="titulo">Sugestão de sequência para as próximas semanas</span>
+<p>Os três itens de prioridade 1 são independentes entre si e podem ser feitos em paralelo com o item 4 (CORDIS). O <em>gold set</em> é o único que exige exclusivamente trabalho humano, então convém começá-lo imediatamente — enquanto ele é curado, o desenvolvimento do CORDIS avança sem bloqueio.</p>
+</div>
+
+<div class="quebra"></div>
+<h2>14. Referência rápida de comandos</h2>
+
+<h3>Instalação</h3>
+<pre><code>python -m venv .venv
+.venv/Scripts/python.exe -m pip install -r requirements-dev.txt
+.venv/Scripts/python.exe -m playwright install chromium   # só se for usar render JS</code></pre>
+
+<h3>Descoberta (barata — só metadados)</h3>
+<pre><code># Fontes com adaptador dedicado
+python -m crawler.cli discover ntrs  --year-start 2015 --year-end 2026
+python -m crawler.cli discover rosap --max-pages 40 --from 2026-01-01
+
+# Fontes com SourceSpec (rastreamento)
+python -m crawler.cli discover faa        --max-pages 200
+python -m crawler.cli discover psas       --max-pages 120
+python -m crawler.cli discover esa_cosmos --max-pages 300
+
+# Opções úteis
+  --reset          zerar a fronteira de URLs antes (recomeçar do zero)
+  --strategy bfs   forçar busca em largura
+  --no-sitemap     forçar navegação em vez de usar o sitemap
+  --no-render      desligar Playwright nesta execução
+  --limit N        parar após N candidatos novos</code></pre>
+
+<h3>Coleta (gasta banda e disco)</h3>
+<pre><code>python -m crawler.cli harvest --tier strong weak --limit 100
+python -m crawler.cli harvest --tier strong            # só os de sinal forte
+python -m crawler.cli retry-failed                     # reenfileirar os que falharam</code></pre>
+
+<h3>Métricas e experimentos</h3>
+<pre><code>python -m crawler.cli report                            # métricas do corpus
+python -m crawler.cli experiment faa --max-pages 200    # focado vs BFS
+python -m crawler.cli sync-ntrs --since 2026-07-28      # exigido pelos termos do NTRS</code></pre>
+
+<h3>Testes</h3>
+<pre><code>.venv/Scripts/python.exe -m pytest tests/ -q</code></pre>
+
+<h3>Onde ficam as coisas</h3>
+<table>
+<tr><th style="width:34%">Caminho</th><th>Conteúdo</th></tr>
+<tr><td><code>config/domains.yaml</code></td><td>Políticas de rede por domínio, <em>blocklist</em>, raiz dos dados</td></tr>
+<tr><td><code>config/lexicon.yaml</code></td><td>Vocabulário de ConOps — reaproveitado nas Etapas 3 e 5</td></tr>
+<tr><td><code>config/sources/*.yaml</code></td><td>Um <code>SourceSpec</code> por fonte rastreada</td></tr>
+<tr><td><code>crawler/core/</code></td><td>Núcleo: registro, pré-filtro, <em>fetch</em>, fila, armazenamento, orquestração</td></tr>
+<tr><td><code>crawler/engine/</code></td><td>Motor de rastreamento</td></tr>
+<tr><td><code>crawler/adapters/</code></td><td>Um adaptador por tipo de fonte</td></tr>
+<tr><td><code>tests/</code></td><td>124 testes e <em>fixtures</em> gravadas</td></tr>
+<tr><td><code>docs/</code></td><td>Achados de campo e documentação do motor</td></tr>
+<tr><td><code>reports/</code></td><td>Métricas datadas de cada execução</td></tr>
+<tr><td><code>C:\ConOpsCorpus\</code></td><td>O corpus — fora do OneDrive, para não sincronizar dezenas de GB</td></tr>
+</table>
+
+<div class="box">
+<span class="titulo">Documentos complementares</span>
+<ul>
+  <li><code>README.md</code> — visão geral e resultados</li>
+  <li><code>docs/crawler.md</code> — projeto detalhado do motor de rastreamento</li>
+  <li><code>docs/achados-api.md</code> — todas as divergências verificadas contra as APIs e sites reais, com evidência</li>
+</ul>
+</div>

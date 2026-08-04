@@ -1,0 +1,59 @@
+# CORDIS — projetos de pesquisa da Comissao Europeia.
+#
+# ESTRATEGIA HIBRIDA. O CORDIS nao deve ser rastreado pagina a pagina: existem
+# bulk downloads mensais em data.europa.eu (XML/CSV/XLS/JSON) por framework
+# programme, incluindo o subconjunto "projectDeliverables" — metadados mais
+# links para os entregaveis, que e exatamente o que interessa. Baixar o CSV
+# custa segundos; filtrar em pandas custa segundos. Rastrear custaria horas.
+#
+# O crawler entra so na segunda etapa: seguir os links de entregavel que
+# sobreviveram ao filtro offline.
+#
+# ALERTA DE PRECISAO: a maioria esmagadora dos entregaveis CORDIS e ruido para
+# este projeto (dissemination plan, progress report, questionnaire). O ganho
+# esta em nichos — sobretudo SESAR JU (ConOps de gerenciamento de trafego
+# aereo) e clusters de aeronautica e espaco. Por isso o filtro de programa vem
+# ANTES do filtro lexico.
+
+name: cordis
+kind: bulk
+strategy: focused
+
+seeds:
+  - https://cordis.europa.eu/about/services
+
+options:
+  # Preenchido pelo adaptador de bulk; o crawler generico so segue os links
+  # aprovados no filtro offline.
+  bulk_portal: https://data.europa.eu/data/datasets?query=cordis
+  programas_prioritarios:
+    - SESAR
+    - H2020-SESAR
+    - HORIZON-SESAR
+    - H2020-EU.3.4.   # Transportes inteligentes, verdes e integrados
+    - HORIZON.2.5     # Cluster 5 — Clima, Energia e Mobilidade
+  subconjuntos:
+    - projectDeliverables
+    - reportSummaries
+
+scope:
+  allow_hosts:
+    - cordis.europa.eu
+    - ec.europa.eu
+    - data.europa.eu
+  deny_paths:
+    - '/search'
+    - '/programme/'
+    - '/statistics'
+  max_depth: 2
+  max_pages: 300
+  same_host_only: false
+
+sitemap: none
+render: false
+
+notes: >
+  Reuso incentivado, sujeito as condicoes de copyright; citar a fonte.
+  Alternativa ao bulk: endpoint SPARQL do grafo EURIO.
+  Ordem de grandeza: Horizon Europe tem ~1.180 entregaveis; H2020 tem dezenas
+  de milhares — dai a necessidade do filtro de programa.

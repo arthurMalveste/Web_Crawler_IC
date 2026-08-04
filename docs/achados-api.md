@@ -148,6 +148,83 @@ O que **permanece válido** do plano: o `sitemap.xml` é autorizado explicitamen
 
 ---
 
+## 3-bis. Rastreamento HTML — achados de campo
+
+Verificações feitas ao implementar o motor de *crawling* genérico.
+
+### Bloqueio por WAF derruba a premissa do "bot acadêmico identificado" ⚠️
+
+O plano original supunha que *"administradores de repositórios públicos toleram bots identificados de universidades e bloqueiam bots anônimos"*. Para sites `.gov` atrás de WAF, o comportamento é **exatamente o inverso**:
+
+| Alvo | UA identificado | UA de navegador | UA híbrido (navegador + contato) |
+|---|---|---|---|
+| `www.faa.gov/*` | **403** | 200 | **403** |
+| `www.faa.gov/robots.txt` | **403** | 200 | **403** |
+| `apps.dtic.mil/sitemap.xml` | **403** | 307 → manutenção | **403** |
+
+O bloqueio vem do Akamai (a página de erro aponta para `errors.edgesuite.net`) e casa a **string exata** do User-Agent: acrescentar qualquer identificação a um UA de navegador volta a dar 403. Não há meio-termo técnico.
+
+Consequência séria: **o `robots.txt` da FAA também retorna 403.** Não é possível ler a política de rastreamento publicada pelo site — não há diretiva a respeitar nem a violar, porque ela é inacessível ao cliente que a consultaria.
+
+**Decisão do projeto (2026-08-04):** usar User-Agent de navegador **restrito a `faa.gov` e `apps.dtic.mil`**, a 1 requisição a cada 3–4 s.
+
+Fundamentos registrados para o relatório:
+
+1. São documentos **públicos de governo**, publicados com a finalidade de acesso público — não há conteúdo restrito nem contorno de autenticação.
+2. A regra do WAF é **mitigação genérica de bots**, aplicada por padrão pelo provedor de CDN, e não política de rastreamento declarada pela instituição. A prova é que a política declarada é inacessível: o `robots.txt` também retorna 403.
+3. A DTIC **autoriza explicitamente** a coleta do seu acervo (*"point your crawler to the sitemap at apps.dtic.mil/sitemap.xml"*), o que torna o bloqueio um efeito colateral da CDN, não uma recusa da instituição.
+4. A carga imposta é desprezível — 1 requisição a cada 3–4 s, com orçamento fechado por fonte.
+
+**Limites da exceção:** vale apenas para esses dois hosts, está declarada e comentada em `config/domains.yaml`, e não se estende a nenhuma outra fonte. Todo o restante do projeto usa o UA identificado com contato institucional. Continua valendo a restrição de coletar apenas material com *Distribution Statement A* na DTIC, e a *blocklist* do R&E Gateway.
+
+**Consequência verificada, e é o argumento mais forte dos quatro:** com o UA de navegador o `robots.txt` da FAA **passa a ser legível** — e o crawler passa a respeitá-lo, o que antes era tecnicamente impossível. O conteúdo é um `robots.txt` padrão de Drupal:
+
+```
+User-agent: *
+Disallow: /core/
+Disallow: /profiles/
+Disallow: /admin/
+Disallow: /fast-41-cpp-tasks/
+...
+```
+
+Nenhuma diretiva proíbe os caminhos que o projeto rastreia (`/sites/faa.gov/files/`, `/uas/`, `/air_traffic/`, `/nextgen/`). Ou seja: **a política de rastreamento declarada pela FAA autoriza exatamente esta coleta**, e o bloqueio do WAF é o que impedia tanto a coleta quanto a leitura da política que a permite. O `urllib.robotparser` do fetcher agora carrega e aplica essa política (log: `robots.carregado host=www.faa.gov presente=True`).
+
+### Sitemap do Liferay (ESA Cosmos) é degenerado
+
+O índice em `cosmos.esa.int/sitemap.xml` aponta para **87 sub-sitemaps de 1 URL cada** (um por *layout* de página). Segui-lo custaria 87 requisições para obter 87 URLs — pior que inútil, porque consome o orçamento antes de o rastreamento começar.
+
+Implementado `SitemapBudget`: teto de 30 requisições e desistência automática quando o rendimento cai abaixo de 3 URLs/requisição. Medido: abandona após 8 requisições e cai para BFS.
+
+### ESA EOF exige renderização JS — mas os arquivos não são públicos
+
+Confirmado por inspeção do HTML servido: **zero links `.pdf`**, presença de `"Loading Document"`, links de documento carregados por JavaScript. Justifica o `render: true` — é a única fonte da lista que precisa.
+
+Com Playwright, o rastreamento **funciona**: 20 páginas renderizadas, 628 links, e a categoria `/document-cat/operations-concept/` lista exatamente os dois alvos:
+
+```
+/document/destine-platform-operations-concept-document/
+/document/esa-eo-framework-eof-csc-operations-concept/
+```
+
+**Porém as landing pages `/document/{slug}/` não contêm link para arquivo algum** — o PDF fica atrás do visualizador e da área de *Sign In*. Resultado: **zero documentos baixáveis**.
+
+Conclusão: o EOF serve como fonte de **metadado** (identifica os ConOps e seus títulos), não de arquivo. Isso confirma com evidência a avaliação de custo/benefício do plano original — a diferença é que agora se sabe *por quê*: não é o volume (34 documentos), é a indisponibilidade pública dos arquivos.
+
+### ESA Cosmos tem pouco material público
+
+A página do Euclid tem **2 subpáginas** e os links `/documents/` são imagens (`.jpg`). Confirma a avaliação do plano ("Cosmos com pouco material público — escopo fechado por missão"). A documentação de projeto está no `dms.cosmos.esa.int`, que exige autenticação e está em *blocklist*.
+
+### Armadilhas de URL observadas
+
+Padrões que efetivamente aparecem e que o `traps.py` corta: mesma página servida como `http://` e `https://` (ROSA P — dobrava a contagem de documentos), busca facetada, navegação de calendário, identificadores de sessão e caminhos repetidos.
+
+### Busca do ROSA P é 403 para bot
+
+`rosap.ntl.bts.gov/gsearch` retorna 403 ao UA identificado, embora `/view/` e `/browse/` respondam 200. Sem impacto prático: o **OAI-PMH é a via correta para esta fonte** e funciona sem restrição.
+
+---
+
 ## 4. Impacto no cronograma
 
 | Item do plano | Situação |

@@ -8,23 +8,46 @@ Coleta automática de documentos de concepção de sistemas (*Concept of Operati
 
 ---
 
-## Decisão metodológica: *harvester-first, crawler-last*
+## Decisão metodológica: crawler genérico, API onde ela existe
 
-O projeto original previa Scrapy/BeautifulSoup/Selenium para todas as fontes. A inspeção direta dos repositórios mostrou que **as fontes de maior valor expõem interfaces de máquina estruturadas** (REST, OAI-PMH, *bulk* CSV, *sitemap*). Rastrear HTML nessas fontes seria mais lento, mais frágil, mais pobre em metadados e eticamente pior.
+O corpus precisa ser **diverso em fonte**, não apenas grande. Se ele vier majoritariamente de um repositório, o classificador da Etapa 5 aprende a reconhecer *o formato daquele repositório* em vez do que é um ConOps — e a conclusão do trabalho não se sustenta fora do acervo de origem. Diversidade de fonte é, aqui, **requisito de validade experimental**.
 
-Rastreamento HTML fica reservado a onde não há alternativa. Isso não é um desvio de escopo: é um resultado da revisão de ferramentas prevista na Atividade 1, e está documentado em [docs/achados-api.md](docs/achados-api.md).
+Por isso o caso geral é um *web crawler* de verdade, capaz de navegar qualquer repositório institucional a partir de um arquivo de configuração. Onde existe interface estruturada (a API do NTRS, o OAI-PMH do ROSA P), ela é preferida: entrega centenas de registros com metadado completo por requisição, contra ~1 no rastreamento HTML.
+
+A escolha entre Scrapy/Selenium e as ferramentas efetivamente adotadas está documentada em [docs/crawler.md](docs/crawler.md); as divergências verificadas contra as APIs e sites reais, em [docs/achados-api.md](docs/achados-api.md).
+
+> 📄 **Documentação completa do sistema (33 páginas, PDF):** [docs/ConOps-Retrieval-Pipeline-Documentacao.pdf](docs/ConOps-Retrieval-Pipeline-Documentacao.pdf) — arquitetura passo a passo, glossário de toda a nomenclatura, pontos positivos e negativos, e próximos passos priorizados. Gerada a partir de [docs/sistema.html](docs/sistema.html) com `python docs/gerar_pdf.py`.
 
 ## Arquitetura
 
 ```
-1. DESCOBERTA   adaptadores (1 por fonte, interface única) -> DocumentRecord
+config/sources/*.yaml -> SourceSpec
+         |
+   +-----+---------------+------------------+
+   |                     |                  |
+API dedicada       Protocolo          CRAWLER GENÉRICO
+(NTRS)             (OAI-PMH,          (navegação HTML,
+                    sitemap, bulk)     rastreamento focado)
+   +-----+---------------+------------------+
+         v
+1. DESCOBERTA   -> DocumentRecord (contrato único)
 2. FILA         SQLite: estado, idempotência, retomada, dedupe
                 + PRÉ-FILTRO LÉXICO sobre metadados (decide SE baixa)
 3. FETCH        downloader único, políticas por domínio
 4. ARMAZENAMENTO endereçado por conteúdo (SHA-256) + manifesto JSONL
 ```
 
-A separação entre **descobrir** e **baixar** é o que permite ao mesmo núcleo servir uma API REST, um OAI-PMH, um dump CSV e um HTML — e é o que torna barato reexecutar a descoberta quando o léxico muda, sem baixar nada de novo.
+A separação entre **descobrir** e **baixar** é o que permite ao mesmo núcleo servir uma API REST, um OAI-PMH, um dump CSV e um site HTML — e é o que torna barato reexecutar a descoberta quando o léxico muda, sem baixar nada de novo.
+
+### Rastreamento focado (*"Web Crawling semântico"*)
+
+O crawler pontua cada link **antes de segui-lo** — tokens da URL, texto da âncora e contexto ao redor — e expande primeiro o que promete mais. As duas estratégias (`focused` e `bfs`) compartilham todo o código; a única diferença é o pontuador estar ligado, de modo que a comparação entre elas seja legítima:
+
+```bash
+python -m crawler.cli experiment rosap_crawl --max-pages 60
+```
+
+Detalhes em [docs/crawler.md](docs/crawler.md).
 
 Duas identidades distintas, deliberadamente separadas:
 
@@ -46,8 +69,13 @@ Antes da primeira coleta em escala, **troque o e-mail de contato** em [config/do
 
 ```bash
 # Descoberta — só metadados, barata, reexecutável à vontade
-python -m crawler.cli discover ntrs  --year-start 2015 --year-end 2026
-python -m crawler.cli discover rosap --max-pages 40
+python -m crawler.cli discover ntrs  --year-start 2015 --year-end 2026   # API
+python -m crawler.cli discover rosap --max-pages 40                      # OAI-PMH
+python -m crawler.cli discover faa   --max-pages 200                     # crawler
+python -m crawler.cli discover psas  --max-pages 120                     # hard negatives
+
+# Rastreamento focado vs BFS na mesma fonte — resultado reportável
+python -m crawler.cli experiment faa --max-pages 200
 
 # Coleta — só aqui gasta banda e disco
 python -m crawler.cli harvest --tier strong weak --limit 100
@@ -62,36 +90,50 @@ python -m crawler.cli report
 python -m crawler.cli sync-ntrs --since 2026-07-28
 ```
 
-## Resultados da primeira execução real (2026-08-04)
+## Resultados medidos (2026-08-04)
 
-| Métrica | Valor |
-|---|---|
-| Candidatos descobertos | 712 (NTRS 295, ROSA P 417) |
-| Documentos coletados | 207 |
-| **Com texto já extraído pela fonte** | **181 / 207 (87%)** |
-| Volume — 181 arquivos de texto | 13 MB |
-| Volume — 26 PDFs | 118 MB |
-| Falhas de download | 1 (timeout de rede, reprocessável) |
-| Descartados por *export control* | 0 |
+**Corpus:** 1.799 candidatos descobertos em 5 fontes, 213 documentos coletados.
 
-Dois números sustentam as decisões do plano:
+| Faixa | Quantidade |
+|---|---:|
+| `strong` (sinal forte no título) | 92 |
+| `weak` (sinal no abstract/subject) | 224 |
+| `hard_negative` (acervo PSAS) | 627 |
+| `negative_sample` (negativos fáceis) | 856 |
+
+Por fonte: PSAS 703 · ROSA P 417 · FAA 383 · NTRS 295.
+
+Quatro números sustentam as decisões de arquitetura:
 
 - **O pré-filtro evita a maior parte do tráfego.** No ROSA P, 4.000 metadados foram varridos em ~40 s e 3.583 PDFs não precisaram ser baixados.
-- **O `links.fulltext` do NTRS barateia a Etapa 2.** 87% do corpus chegou como texto pronto, ocupando 13 MB — os mesmos documentos em PDF ocupariam ordens de grandeza mais e exigiriam extração.
+- **O `links.fulltext` do NTRS barateia a Etapa 2.** 87% dos documentos do NTRS chegaram como texto já extraído, ocupando 13 MB — os mesmos em PDF ocupariam ordens de grandeza mais e exigiriam extração.
+- **O rastreamento focado dobrou o rendimento.** Na FAA, com orçamento idêntico de 79 páginas: `harvest_rate` 0,0506 (focado) contra 0,0253 (BFS) — **ganho de 2,0×**. Ressalva: números absolutos pequenos (4 contra 2 documentos relevantes); é sugestivo, não conclusivo. Ver [docs/crawler.md](docs/crawler.md).
+- **Sitemap, quando existe, dispensa navegar.** A FAA entregou 4.175 URLs em poucas requisições.
 
 Idempotência verificada em produção: reexecutar a descoberta no mesmo escopo devolveu **377 vistos, 0 novos**.
 
 ## Fontes
 
-| Fonte | Camada | Estratégia | Situação |
-|---|---|---|---|
-| **NTRS / NASA STI** | API REST | cliente REST + particionamento | ✅ implementado |
-| **ROSA P (US DOT)** | OAI-PMH | *harvester* + coleta incremental | ✅ implementado |
-| CORDIS | *bulk* CSV | download + filtro offline | pendente |
-| DTIC | *sitemap* | *sitemap* + fetch lento | ⚠️ host em manutenção |
-| MIT PSAS | HTML estático | 1 GET + BeautifulSoup | pendente |
-| ESA Cosmos | portal Liferay | crawler limitado por missão | pendente |
-| ESA EOF / FAA / EASA / NHTSA | URLs conhecidas | lista-semente | pendente |
+| Fonte | Via | Situação |
+|---|---|---|
+| **NTRS / NASA STI** | API REST dedicada | ✅ coletando |
+| **ROSA P (US DOT)** | OAI-PMH + coleta incremental | ✅ coletando |
+| **MIT PSAS** (*hard negatives*) | crawler | ✅ 703 documentos |
+| **FAA** | crawler | ✅ 4.175 URLs via sitemap |
+| **ESA Cosmos** | crawler | ✅ roda — pouco material público |
+| **ESA EOF** | crawler + Playwright | ⚠️ rastreia, mas arquivos não são públicos |
+| **DTIC** | *sitemap* autorizado + crawler | ⛔ host em manutenção |
+| **CORDIS** | *bulk* CSV + crawler | spec pronto, adaptador *bulk* pendente |
+
+Adicionar uma fonte custa um YAML em [config/sources/](config/sources/) — nenhum código Python.
+
+### Exceção de User-Agent: FAA e DTIC
+
+Ambos retornam **403 ao User-Agent identificado** e 200 apenas ao User-Agent de navegador puro; um UA híbrido (navegador + contato acadêmico) também é bloqueado. Na FAA, o próprio `robots.txt` retorna 403 — a política de rastreamento do site é inacessível ao cliente que a consultaria.
+
+Isso derruba a premissa de que *"administradores toleram bots identificados de universidades"*: para sites `.gov` atrás de Akamai, o efeito é o inverso.
+
+**Decisão do projeto:** usar UA de navegador **restrito a `faa.gov` e `apps.dtic.mil`**, com taxa de 1 requisição a cada 3–4 s. Justificativa: são documentos públicos de governo, publicados para acesso público; a regra do WAF é mitigação genérica de bots, não política declarada da instituição; e a carga imposta é desprezível. Todo o restante do projeto continua com o UA identificado e contato institucional. A exceção está delimitada e comentada em [config/domains.yaml](config/domains.yaml) e detalhada em [docs/achados-api.md](docs/achados-api.md).
 
 ## Pré-filtro léxico
 
@@ -110,6 +152,7 @@ O léxico ([config/lexicon.yaml](config/lexicon.yaml)) inclui a **assinatura est
 ## Conformidade
 
 - **Export control:** registros com ITAR/EAR marcado são descartados **antes** de entrar na fila. A contagem vai para `rejects.jsonl` e para o relatório.
+- **User-Agent:** identificável e com contato institucional em todas as fontes, **exceto** `faa.gov` e `apps.dtic.mil`, onde o WAF só responde a UA de navegador (ver acima). A exceção é explícita, delimitada por host e documentada.
 - **NTRS:** atribuição obrigatória — *"Data provided by NASA Scientific and Technical Information Program"*. Os termos exigem consulta semanal a `/redistributions` e remoção de documentos retirados (comando `sync-ntrs`).
 - **DTIC:** apenas *Distribution Statement A*. R&E Gateway (exige CAC/PIV) em blocklist.
 - **ESA:** `dms.cosmos.esa.int` exige autenticação e está em **blocklist explícita** — não se tenta acesso.

@@ -1,0 +1,52 @@
+# FAA — PDFs avulsos em site Drupal.
+#
+# Nao e repositorio: sao documentos soltos. Rastrear faa.gov inteiro seria
+# carissimo e quase todo irrelevante, entao a estrategia e semente + expansao
+# dirigida: parte-se dos ConOps ja conhecidos e segue-se apenas o que o
+# LinkScorer considerar promissor, com orcamento curto.
+#
+# As duas sementes abaixo sao ConOps confirmados e entram no gold set.
+
+name: faa
+kind: crawl
+strategy: focused
+
+seeds:
+  - https://www.faa.gov/sites/faa.gov/files/space/airspace_integration/Final_CSINAS_ConOps.pdf
+  - https://www.faa.gov/sites/faa.gov/files/Urban%20Air%20Mobility%20%28UAM%29%20Concept%20of%20Operations%202.0_0.pdf
+  - https://www.faa.gov/uas/advanced_operations
+  - https://www.faa.gov/air_traffic/technology
+  - https://www.faa.gov/newsroom/documents
+
+scope:
+  allow_hosts:
+    - faa.gov
+  # Concentra em areas com documentacao tecnica; evita o site institucional.
+  allow_paths:
+    - /sites/faa.gov/files/
+    - /uas/
+    - /air_traffic/
+    - /aircraft/
+    - /space/
+    - /nextgen/
+    - /regulations_policies/
+  deny_paths:
+    - /jobs
+    - /about/office_org
+    - /contact
+    - /foia
+    - /accessibility
+    - /newsroom/media
+    - /licenses_certificates/airmen_certification
+    - '/search'
+  max_depth: 3
+  max_pages: 400
+
+sitemap: auto
+render: false
+
+notes: >
+  Deduplicacao obrigatoria: varios destes documentos tambem estao no ROSA P e
+  no NTRS. Sem hash de conteudo, o mesmo ConOps seria contado tres vezes e
+  inflaria as metricas artificialmente. Resolvido pelo enderecamento por
+  SHA-256 em core/store.py.

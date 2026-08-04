@@ -1,0 +1,66 @@
+# ESA Earth Observation Framework — documentacao.
+#
+# Espaco pequeno e de alta precisao: ~34 documentos em 7 categorias, das quais
+# "Operations concept" (2 documentos) e o alvo exato. Justamente por ser
+# pequeno, e a fonte que melhor exercita a renderizacao JS: a pagina entrega
+# "Loading Document..." e busca a lista por JavaScript, entao sem render o
+# crawler ve uma pagina vazia.
+#
+# Orcamento minusculo de proposito — 34 documentos nao justificam mais.
+
+name: esa_eof
+kind: crawl
+strategy: focused
+
+seeds:
+  # A categoria "Operations concept" e o alvo exato — 2 dos 34 documentos.
+  - https://eof.esa.int/document-cat/operations-concept/
+  - https://eof.esa.int/document-cat/specifications-architecture/
+  - https://eof.esa.int/documentation/
+
+scope:
+  allow_hosts:
+    - eof.esa.int
+  # Verificado no HTML renderizado: os documentos NAO sao PDFs diretos. Cada um
+  # tem uma landing page em /document/{slug}/, e o arquivo esta dentro dela.
+  # Por isso o rastreamento precisa de profundidade — o alvo esta a 2 saltos.
+  allow_paths:
+    - '/document/'
+    - '/document-cat/'
+    - '/documentation'
+    - '/eopf-documentation'
+  deny_paths:
+    - /wp-admin
+    - /wp-login
+    - '/sign-in'
+    - '/login'
+  max_depth: 4
+  max_pages: 80
+
+render: true            # sem isto a pagina vem vazia
+render_wait_ms: 3500
+
+# O sitemap do WordPress lista as landing pages e sai mais barato que navegar.
+sitemap: auto
+
+notes: >
+  ACHADO DE CAMPO (2026-08-04, com Playwright): o rastreamento funciona e
+  renderiza corretamente, mas os ARQUIVOS NAO SAO PUBLICAMENTE ACESSIVEIS.
+
+  A pagina /document-cat/operations-concept/ lista exatamente os dois alvos:
+    /document/destine-platform-operations-concept-document/
+    /document/esa-eo-framework-eof-csc-operations-concept/
+  Porem as landing pages /document/{slug}/ nao contem link para PDF algum —
+  o arquivo fica atras do visualizador e da area de Sign In. 20 paginas
+  renderizadas, 628 links, ZERO documentos baixaveis.
+
+  CONSEQUENCIA: o EOF vale como fonte de METADADO (identifica os dois ConOps
+  e seus titulos), nao como fonte de arquivo. O crawler nao tenta autenticacao
+  em hipotese alguma; caminhos de login estao em deny_paths.
+
+  Isso confirma, com evidencia, a avaliacao de custo/beneficio do plano
+  original: nao compensa investir nesta fonte. A diferenca e que agora se sabe
+  POR QUE — nao e o volume (34 documentos), e a indisponibilidade dos arquivos.
+
+  Alternativa nao explorada: a WP REST API em /wp-json/wp/v2/ pode expor os
+  mesmos itens em JSON, mas provavelmente com a mesma restricao de arquivo.

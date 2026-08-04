@@ -1,0 +1,53 @@
+# DTIC — Defense Technical Information Center.
+#
+# CORRECAO IMPORTANTE DE ALVO: o acervo esta em apps.dtic.mil.
+# discover.dtic.mil e o site institucional (WordPress, noticias e politicas) e
+# nao contem documento nenhum — apontar o crawler para la nao coleta nada.
+#
+# A propria DTIC autoriza a coleta em discover.dtic.mil/technical-reports:
+# "To index DTIC's collection of unclassified and unlimited Technical Reports,
+#  point your crawler to the sitemap at https://apps.dtic.mil/sitemap.xml"
+#
+# SITUACAO VERIFICADA EM 2026-08-04:
+#   - UA identificado          -> HTTP 403
+#   - UA de navegador          -> HTTP 307 -> /landingpage/maint.html
+# Ou seja: ha filtragem por User-Agent (real, tratada com browser_ua em
+# config/domains.yaml) E o host inteiro esta fora do ar por manutencao.
+# Nenhuma tecnica de cliente contorna servidor desligado — Playwright nao
+# resolveria. A acao correta e reverificar disponibilidade periodicamente.
+#
+# Padroes de URL confirmados:
+#   citacao (legado)  apps.dtic.mil/sti/citations/AD{A|B|C|P|0}NNNNNN
+#   citacao (TRECMS)  apps.dtic.mil/sti/citations/trecms/AD{N}
+#   PDF (legado)      apps.dtic.mil/sti/pdfs/AD{N}.pdf
+#   PDF (TRECMS)      apps.dtic.mil/sti/trecms/pdf/AD{N}.pdf
+#   HTML renderizado  apps.dtic.mil/sti/html/tr/AD{N}/index.html
+
+name: dtic
+kind: crawl
+strategy: focused
+
+seeds:
+  - https://apps.dtic.mil/sti/citations/
+
+scope:
+  allow_hosts:
+    - apps.dtic.mil
+  allow_paths:
+    - /sti/
+  deny_paths:
+    - /landingpage/maint
+    - '/login'
+    - '/saml'
+  max_depth: 3
+  max_pages: 800
+
+# Autorizado explicitamente pela DTIC — e a via preferencial para esta fonte.
+sitemap: https://apps.dtic.mil/sitemap.xml
+render: false
+
+notes: >
+  RESTRICAO JURIDICA: coletar apenas material com Distribution Statement A
+  (publico, ilimitado). Nao tentar o R&E Gateway, que exige CAC/PIV —
+  rndgateway.dtic.mil esta na blocklist global.
+  NTRS e ROSA P sustentam o corpus caso esta fonte permaneca indisponivel.
