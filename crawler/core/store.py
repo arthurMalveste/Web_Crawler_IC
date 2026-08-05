@@ -41,6 +41,27 @@ class Store:
         ext = ".txt" if text else EXT_BY_KIND.get(kind or "", ".bin")
         return base / sha[:2] / f"{sha}{ext}"
 
+    def relative(self, path: Path | str) -> str:
+        """Caminho relativo a raiz do corpus, com barras normais.
+
+        E o que vai para o banco. Guardar caminho ABSOLUTO tornaria o corpus
+        preso ao diretorio em que foi criado: mover a pasta (ou abri-la em
+        outra maquina) invalidaria todas as referencias de uma vez. Com
+        caminho relativo, o acervo inteiro e portatil — basta o `data_root`
+        apontar para onde ele esta agora.
+        """
+        p = Path(path)
+        try:
+            return p.resolve().relative_to(self.root.resolve()).as_posix()
+        except ValueError:
+            # Fora da raiz: nao ha relativo possivel, preserva como veio.
+            return p.as_posix()
+
+    def absolute(self, rel: str) -> Path:
+        """Inverso de `relative`. Tolera caminhos absolutos legados."""
+        p = Path(rel)
+        return p if p.is_absolute() else self.root / p
+
     def put(self, body: bytes, kind: str | None, *, text: bool = False) -> tuple[str, Path, bool]:
         """Grava e devolve (sha256, caminho, era_novo)."""
         sha = sha256_bytes(body)

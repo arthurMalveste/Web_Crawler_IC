@@ -3,9 +3,18 @@
 # `rate` = segundos MINIMOS entre requisicoes ao dominio (nao req/s).
 # Valores derivados de limites publicados ou medidos, nao chutados.
 
-# Raiz do corpus. Fora do OneDrive de proposito: o acervo chega a dezenas de GB
-# e a sincronizacao trava o cliente e gera conflitos de arquivo.
-data_root: "C:/ConOpsCorpus"
+# Raiz do corpus — onde os arquivos baixados sao gravados.
+#
+# NAO escreva um caminho absoluto aqui: este arquivo e versionado, e um caminho
+# absoluto e valido em UMA maquina so. O valor real vive na variavel
+# CONOPS_DATA_ROOT do `.env` (fora do git); veja `.env.example`.
+#
+# O default abaixo cobre o layout padrao — o corpus como pasta irma do
+# repositorio — e e resolvido a partir da raiz do REPOSITORIO, nao do diretorio
+# de onde o comando foi chamado. Quem seguir esse layout nem precisa de `.env`.
+#
+# O .gitignore ja impede que o corpus entre no controle de versao.
+data_root: "${CONOPS_DATA_ROOT:-../ConOpsCorpus}"
 
 defaults:
   timeout_s: 60          # por operacao de leitura (httpx)
@@ -19,8 +28,8 @@ defaults:
   rate: 2.0
   # Identificacao obrigatoria. TROCAR o e-mail pelo institucional antes da
   # primeira coleta em escala — e o que distingue um bot academico tolerado de
-  # um bot anonimo bloqueado.
-  user_agent: "UNICAMP-FT-ConOpsBot/0.1 (Iniciacao Cientifica STPA; +mailto:CONTATO@unicamp.br)"
+  # um bot anonimo bloqueado. O endereco vem de CONOPS_CONTACT_EMAIL (`.env`).
+  user_agent: "UNICAMP-FT-ConOpsBot/0.1 (Iniciacao Cientifica STPA; +mailto:${CONOPS_CONTACT_EMAIL:-CONTATO@unicamp.br})"
 
 domains:
   # 500 req / 15 min medido nos headers X-RateLimit-* -> 1.8 s/req.

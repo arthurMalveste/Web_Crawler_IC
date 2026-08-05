@@ -1,8 +1,14 @@
 httpx[http2]==0.27.2
-tenacity==9.0.0
 beautifulsoup4==4.12.3
 lxml==5.3.0
 PyYAML==6.0.2
 structlog==24.4.0
 pypdf==5.1.0
-pandas==2.2.3
+
+# OPCIONAL — renderizacao de paginas com JavaScript (ESA EOF) e geracao do PDF
+# da documentacao (docs/gerar_pdf.py). Fora da lista fixa de proposito: sao
+# ~400 MB com o Chromium, e o crawler funciona sem ele — o renderizador avisa e
+# segue adiante quando o pacote nao esta presente. Para habilitar:
+#
+#     pip install playwright==1.48.0
+#     playwright install chromium

@@ -61,9 +61,24 @@ URL nunca é chave: no Liferay (ESA Cosmos) ela carrega `uuid` + *timestamp* e m
 ```bash
 python -m venv .venv
 .venv/Scripts/python.exe -m pip install -r requirements-dev.txt
+copy .env.example .env          # cp no bash
 ```
 
-Antes da primeira coleta em escala, **troque o e-mail de contato** em [config/domains.yaml](config/domains.yaml). Um User-Agent identificável com contato institucional é o que distingue um bot acadêmico tolerado de um bot anônimo bloqueado.
+O `.env` guarda **tudo que depende da máquina** — e só isso. Ele não vai para o git; [.env.example](.env.example) é o modelo versionado, com as variáveis comentadas:
+
+| Variável | Para que serve |
+|---|---|
+| `CONOPS_DATA_ROOT` | Raiz do corpus. Se ele for pasta irmã do repositório (`../ConOpsCorpus`), o padrão já serve e o `.env` é dispensável. |
+| `CONOPS_CONTACT_EMAIL` | E-mail anunciado no User-Agent. **Trocar pelo institucional** antes da primeira coleta em escala: um bot acadêmico identificável é tolerado, um bot anônimo é bloqueado. |
+
+O [config/domains.yaml](config/domains.yaml) referencia essas variáveis como `${VAR:-default}` e nunca contém caminho absoluto — é arquivo versionado, e caminho absoluto vale em uma máquina só. Uma variável já exportada no ambiente tem prioridade sobre o `.env`, o que permite apontar uma execução para outro corpus sem editar arquivo nenhum:
+
+```bash
+CONOPS_DATA_ROOT=/mnt/scratch/corpus python -m crawler.cli report   # bash
+python -m crawler.cli report --data-root D:/outro/Corpus            # ou por flag
+```
+
+**Se você mover o corpus ou o repositório**, basta atualizar `CONOPS_DATA_ROOT`: os caminhos gravados no banco são relativos a essa raiz, então continuam válidos.
 
 ## Uso
 
@@ -169,7 +184,7 @@ Os testes usam *fixtures* gravadas dos serviços reais (`tests/fixtures/`) e **n
 ## Estrutura
 
 ```
-config/       domains.yaml (políticas), lexicon.yaml (termos), seeds/
+config/       domains.yaml (políticas), lexicon.yaml (termos), sources/ (uma fonte por YAML)
 crawler/core/ record, prefilter, fetcher, frontier, store, pipeline
 crawler/adapters/  ntrs, rosap, ...
 docs/         achados-api.md — divergências verificadas contra as APIs reais
@@ -177,4 +192,4 @@ reports/      métricas datadas de cada execução
 tests/        fixtures gravadas
 ```
 
-O corpus é gravado em `data_root` ([config/domains.yaml](config/domains.yaml)), **fora do OneDrive** de propósito: dezenas de GB sincronizando travam o cliente e geram conflitos de arquivo.
+O corpus é gravado em `data_root` — configurado por `CONOPS_DATA_ROOT` no [.env](.env.example) —, **fora do repositório e fora do OneDrive** de propósito: dezenas de GB sincronizando travam o cliente e geram conflitos de arquivo.

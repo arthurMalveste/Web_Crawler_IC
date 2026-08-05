@@ -24,6 +24,8 @@ import httpx
 import structlog
 import yaml
 
+from .env import carregar_dotenv, expandir_arvore, resolver_caminho
+
 log = structlog.get_logger(__name__)
 
 BROWSER_UA = (
@@ -85,11 +87,18 @@ class DomainPolicy:
 
 
 class Config:
-    """Le config/domains.yaml e resolve a politica efetiva por dominio."""
+    """Le config/domains.yaml e resolve a politica efetiva por dominio.
+
+    O YAML pode referenciar variaveis de ambiente como `${VAR}` ou
+    `${VAR:-default}`; elas vem do `.env` da raiz ou do ambiente. E o que
+    mantem caminhos de UMA maquina fora de um arquivo versionado (ver
+    `crawler/core/env.py`).
+    """
 
     def __init__(self, raw: dict[str, Any]):
-        self.raw = raw
-        self.data_root = Path(raw.get("data_root", "data"))
+        carregar_dotenv()
+        self.raw = raw = expandir_arvore(raw)
+        self.data_root = resolver_caminho(raw.get("data_root", "data"))
         self.defaults = raw.get("defaults", {}) or {}
         self.domains = raw.get("domains", {}) or {}
         self.blocklist = {d.lower() for d in (raw.get("blocklist") or [])}

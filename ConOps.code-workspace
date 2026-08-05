@@ -1,0 +1,28 @@
+{
+  "folders": [
+    {
+      "name": "Codigo (Web_Crawler_IC)",
+      "path": "."
+    },
+    {
+      "name": "Corpus (dados coletados)",
+      "path": "../ConOpsCorpus"
+    }
+  ],
+  "settings": {
+    "files.associations": {
+      "*.jsonl": "jsonl"
+    },
+    "search.exclude": {
+      "**/raw/**": true,
+      "**/text/**": true,
+      "**/.venv/**": true
+    },
+    "python.defaultInterpreterPath": "${workspaceFolder}/.venv/Scripts/python.exe"
+  },
+  "extensions": {
+    "recommendations": [
+      "qwtel.sqlite-viewer"
+    ]
+  }
+}

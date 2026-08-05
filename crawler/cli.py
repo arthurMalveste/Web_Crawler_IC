@@ -30,7 +30,7 @@ from .core.fetcher import Config, Fetcher
 from .core.frontier import Frontier
 from .core.pipeline import Pipeline
 from .core.prefilter import Lexicon
-from .core.record import TIER_NEGATIVE, TIER_STRONG, TIER_WEAK
+from .core.record import TIER_HARD_NEGATIVE, TIER_NEGATIVE, TIER_STRONG, TIER_WEAK
 from .core.store import Store
 from .engine.spec import STRATEGY_BFS, STRATEGY_FOCUSED, SourceSpec
 
@@ -197,6 +197,29 @@ def cmd_experiment(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_browse(args: argparse.Namespace) -> int:
+    """Gera um indice HTML do corpus — resolve os nomes em SHA-256."""
+    from .browse import gerar
+
+    config = Config.load(CONFIG_DIR / "domains.yaml")
+    data_root = Path(args.data_root) if args.data_root else config.data_root
+    tiers = None
+    if args.tier:
+        tiers = [
+            {"strong": TIER_STRONG, "weak": TIER_WEAK, "negative": TIER_NEGATIVE,
+             "hard": TIER_HARD_NEGATIVE}[t]
+            for t in args.tier
+        ]
+    saida = Path(args.out) if args.out else ROOT / "reports" / "corpus.html"
+    n = gerar(data_root / "frontier.sqlite", saida, tiers, args.limit)
+    print(f"{n} documentos -> {saida}")
+    if args.abrir:
+        import webbrowser
+
+        webbrowser.open(saida.resolve().as_uri())
+    return 0
+
+
 def cmd_retry(args: argparse.Namespace) -> int:
     """Devolve os falhos a fila — usar depois de corrigir o coletor."""
     _, _, _, frontier, fetcher, _ = build(args)
@@ -288,6 +311,13 @@ def main(argv: list[str] | None = None) -> int:
     t = sub.add_parser("retry-failed", help="reenfileirar os falhos (apos corrigir o coletor)")
     t.add_argument("--source", help="limitar a uma fonte")
     t.set_defaults(func=cmd_retry)
+
+    b = sub.add_parser("browse", help="indice HTML navegavel do corpus")
+    b.add_argument("--tier", nargs="*", choices=["strong", "weak", "negative", "hard"])
+    b.add_argument("--limit", type=int)
+    b.add_argument("--out", help="caminho do HTML (padrao: reports/corpus.html)")
+    b.add_argument("--abrir", action="store_true", help="abrir no navegador ao terminar")
+    b.set_defaults(func=cmd_browse)
 
     r = sub.add_parser("report", help="metricas da coleta")
     r.set_defaults(func=cmd_report)

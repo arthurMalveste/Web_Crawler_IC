@@ -220,8 +220,10 @@ class Pipeline:
             st.bytes_baixados += len(res.body)
 
             n_pages = count_pdf_pages(path) if res.kind == "pdf" else None
+            # Caminho RELATIVO a raiz do corpus: torna o acervo portatil.
+            rel = self.store.relative(path)
             conteudo_novo = self.frontier.register_content(
-                sha, str(path), res.kind, len(res.body), rec.key, n_pages
+                sha, rel, res.kind, len(res.body), rec.key, n_pages
             )
 
             if is_text:
@@ -237,7 +239,7 @@ class Pipeline:
                 rec.key,
                 status,
                 sha256=sha,
-                stored_path=str(path),
+                stored_path=rel,
                 content_kind=res.kind,
                 http_status=res.status,
                 etag=res.etag,
@@ -248,7 +250,7 @@ class Pipeline:
             self.store.append_manifest(
                 rec,
                 sha256=sha,
-                stored_path=str(path),
+                stored_path=rel,
                 content_kind=res.kind,
                 size_bytes=len(res.body),
                 n_pages=n_pages,

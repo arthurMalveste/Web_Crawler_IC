@@ -60,6 +60,11 @@ CREATE INDEX IF NOT EXISTS idx_docs_status  ON documents(status);
 CREATE INDEX IF NOT EXISTS idx_docs_tier    ON documents(tier);
 CREATE INDEX IF NOT EXISTS idx_docs_source  ON documents(source);
 CREATE INDEX IF NOT EXISTS idx_docs_sha     ON documents(sha256);
+-- Indice composto que serve `pending()`: filtra por status E ordena por
+-- pontuacao. Sem ele o banco usa o indice de status e ordena o resultado em
+-- memoria — medido em 200 mil linhas, 342 ms contra 1,4 ms. A ordem das
+-- colunas importa: status primeiro (igualdade), pontuacao depois (ordenacao).
+CREATE INDEX IF NOT EXISTS idx_docs_fila    ON documents(status, lexicon_score DESC);
 
 -- Um registro por CONTEUDO distinto. `provenance` acumula as chaves de
 -- descoberta que levaram ao mesmo arquivo: a sobreposicao entre repositorios

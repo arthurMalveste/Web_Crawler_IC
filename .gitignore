@@ -3,6 +3,11 @@ __pycache__/
 *.py[cod]
 .pytest_cache/
 
+# Configuracao especifica da maquina (caminho do corpus, e-mail de contato).
+# O modelo .env.example E versionado de proposito.
+.env
+!.env.example
+
 # O corpus vive em data_root (config/domains.yaml), fora do repositorio.
 # Estas entradas cobrem o caso de alguem apontar data_root para ca por engano.
 data/
@@ -15,3 +20,8 @@ rejects.jsonl
 # Metricas datadas sao versionadas de proposito (reprodutibilidade);
 # arquivos de trabalho, nao.
 reports/*.tmp
+
+# Indice navegavel do corpus: derivado do banco, refeito por `cli browse` em
+# segundos e pesado (centenas de KB). Versiona-lo so geraria diff gigante a
+# cada coleta.
+reports/corpus.html

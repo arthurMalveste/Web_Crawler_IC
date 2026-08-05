@@ -839,7 +839,10 @@ sitemap: auto                       # tentar sitemap antes de navegar</code></pr
 <h3>Instalação</h3>
 <pre><code>python -m venv .venv
 .venv/Scripts/python.exe -m pip install -r requirements-dev.txt
-.venv/Scripts/python.exe -m playwright install chromium   # só se for usar render JS</code></pre>
+.venv/Scripts/python.exe -m playwright install chromium   # só se for usar render JS
+copy .env.example .env                                    # config desta máquina</code></pre>
+
+<p>O <code>.env</code> concentra o que varia por máquina — <code>CONOPS_DATA_ROOT</code> (raiz do corpus) e <code>CONOPS_CONTACT_EMAIL</code> (contato no <em>User-Agent</em>) — e fica fora do controle de versão. O <code>domains.yaml</code>, que é versionado, apenas referencia essas variáveis como <code>${VAR:-default}</code>: caminho absoluto num arquivo rastreado vale em uma máquina só, e foi o que quebrou a coleta quando a pasta do projeto mudou de lugar.</p>
 
 <h3>Descoberta (barata — só metadados)</h3>
 <pre><code># Fontes com adaptador dedicado
@@ -874,16 +877,17 @@ python -m crawler.cli sync-ntrs --since 2026-07-28      # exigido pelos termos d
 <h3>Onde ficam as coisas</h3>
 <table>
 <tr><th style="width:34%">Caminho</th><th>Conteúdo</th></tr>
+<tr><td><code>.env</code></td><td>Configuração desta máquina: raiz do corpus e e-mail de contato. Fora do git; modelo em <code>.env.example</code></td></tr>
 <tr><td><code>config/domains.yaml</code></td><td>Políticas de rede por domínio, <em>blocklist</em>, raiz dos dados</td></tr>
 <tr><td><code>config/lexicon.yaml</code></td><td>Vocabulário de ConOps — reaproveitado nas Etapas 3 e 5</td></tr>
 <tr><td><code>config/sources/*.yaml</code></td><td>Um <code>SourceSpec</code> por fonte rastreada</td></tr>
 <tr><td><code>crawler/core/</code></td><td>Núcleo: registro, pré-filtro, <em>fetch</em>, fila, armazenamento, orquestração</td></tr>
 <tr><td><code>crawler/engine/</code></td><td>Motor de rastreamento</td></tr>
 <tr><td><code>crawler/adapters/</code></td><td>Um adaptador por tipo de fonte</td></tr>
-<tr><td><code>tests/</code></td><td>124 testes e <em>fixtures</em> gravadas</td></tr>
+<tr><td><code>tests/</code></td><td>140 testes e <em>fixtures</em> gravadas</td></tr>
 <tr><td><code>docs/</code></td><td>Achados de campo e documentação do motor</td></tr>
 <tr><td><code>reports/</code></td><td>Métricas datadas de cada execução</td></tr>
-<tr><td><code>C:\ConOpsCorpus\</code></td><td>O corpus — fora do OneDrive, para não sincronizar dezenas de GB</td></tr>
+<tr><td><code>CONOPS_DATA_ROOT</code></td><td>O corpus — fora do repositório e fora do OneDrive, para não sincronizar dezenas de GB. Padrão: <code>../ConOpsCorpus</code></td></tr>
 </table>
 
 <div class="box">
