@@ -144,7 +144,7 @@ def cmd_harvest(args: argparse.Namespace) -> int:
     if args.tier:
         tiers = [{"strong": TIER_STRONG, "weak": TIER_WEAK, "negative": TIER_NEGATIVE}[t] for t in args.tier]
     with fetcher, frontier:
-        stats = pipeline.harvest(limit=args.limit, tiers=tiers)
+        stats = pipeline.harvest(limit=args.limit, tiers=tiers, max_workers=args.workers)
     print(json.dumps(stats.as_dict(), indent=2, ensure_ascii=False))
     return 0
 
@@ -303,9 +303,14 @@ def main(argv: list[str] | None = None) -> int:
     e.add_argument("--no-render", action="store_true")
     e.set_defaults(func=cmd_experiment)
 
-    h = sub.add_parser("harvest", help="baixar o que a fila aprovou")
+    h = sub.add_parser("harvest", help="baixar o que a fila aprovou (paralelo por dominio)")
     h.add_argument("--limit", type=int)
     h.add_argument("--tier", nargs="*", choices=["strong", "weak", "negative"])
+    h.add_argument(
+        "--workers",
+        type=int,
+        help="threads simultaneas (padrao: soma da concorrencia configurada por dominio em domains.yaml)",
+    )
     h.set_defaults(func=cmd_harvest)
 
     t = sub.add_parser("retry-failed", help="reenfileirar os falhos (apos corrigir o coletor)")

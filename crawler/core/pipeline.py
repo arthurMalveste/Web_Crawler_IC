@@ -8,10 +8,13 @@ primeira fase — e por isso que expandir o lexico e reexecutar custa pouco.
 
 from __future__ import annotations
 
+import threading
 import uuid
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterator
+from urllib.parse import urlsplit
 
 import structlog
 
@@ -152,24 +155,92 @@ class Pipeline:
 
     # ---------------------------------------------------------------- coleta
 
-    def harvest(self, limit: int | None = None, tiers: list[str] | None = None) -> HarvestStats:
+    def harvest(
+        self,
+        limit: int | None = None,
+        tiers: list[str] | None = None,
+        *,
+        max_workers: int | None = None,
+    ) -> HarvestStats:
+        """Baixa o que a fila aprovou — em paralelo, um grupo de threads por
+        dominio dentro do teto que `config/domains.yaml` ja declarava.
+
+        Nenhum agendamento manual de dominio acontece aqui: basta submeter
+        TODOS os pendentes de uma vez a um pool de threads. Quem garante que
+        um dominio nunca ultrapassa seu `rate`/`concurrency` e' o
+        `Fetcher` (um semaforo e um lock por host — ver `fetcher.py`); duas
+        threads de dominios DIFERENTES simplesmente nunca disputam o mesmo
+        semaforo e progridem de verdade em paralelo. E' esse desenho —
+        limitar por CHAVE em vez de um limite global — que transforma uma
+        coleta de varias fontes de horas em minutos sem arriscar sobrecarregar
+        nenhum servidor individual.
+
+        `max_workers` por padrao e' a soma da concorrencia configurada dos
+        dominios presentes no lote: threads a mais nao aceleram nada (ficariam
+        so esperando a vez no semaforo do proprio host), entao nao ha razao
+        para abrir mais que isso.
+        """
         run_id = f"harvest-{uuid.uuid4().hex[:8]}"
         self.frontier.start_run(run_id, "harvest", {"limit": limit, "tiers": tiers})
         st = HarvestStats()
+        st_lock = threading.Lock()
 
-        for rec in list(self.frontier.pending(limit=limit, tiers=tiers)):
-            st.tentados += 1
-            self._harvest_one(rec, st)
+        pendentes = list(self.frontier.pending(limit=limit, tiers=tiers))
+        st.tentados = len(pendentes)
+
+        n_workers = max_workers or self._worker_count(pendentes)
+        log.info("harvest.iniciado", pendentes=len(pendentes), workers=n_workers)
+
+        concluidos = 0
+        with ThreadPoolExecutor(max_workers=n_workers, thread_name_prefix="harvest") as pool:
+            futuros = [pool.submit(self._harvest_one, rec, st, st_lock) for rec in pendentes]
+            for fut in as_completed(futuros):
+                fut.result()  # relanca excecao de alguma thread, se houve
+                concluidos += 1
+                if concluidos % 25 == 0 or concluidos == len(pendentes):
+                    log.info("harvest.progresso", concluidos=concluidos, total=len(pendentes))
 
         self.frontier.finish_run(run_id, st.as_dict())
         log.info("harvest.concluido", **st.as_dict())
         return st
 
-    def _harvest_one(self, rec: DocumentRecord, st: HarvestStats) -> None:
+    def _worker_count(self, records: list[DocumentRecord]) -> int:
+        """Soma da concorrencia configurada por dominio presente no lote.
+
+        So a URL preferida de cada registro conta para o dimensionamento —
+        e' so uma estimativa de QUANTAS threads vale abrir; a correcao de
+        quantas rodam de fato por host e' sempre do semaforo no `Fetcher`,
+        nao deste numero. Piso de 1 (lote vazio ainda precisa de um pool
+        valido) e teto de 32 (nao ha necessidade real de mais do que isso
+        mesmo com dezenas de dominios configurados).
+        """
+        hosts = {
+            urlsplit(rec.candidate_urls[0]).netloc.lower()
+            for rec in records
+            if rec.candidate_urls
+        }
+        if not hosts:
+            return 1
+        total = sum(self.fetcher.policy_for(h).concurrency for h in hosts)
+        return max(1, min(total, 32))
+
+    def _harvest_one(
+        self, rec: DocumentRecord, st: HarvestStats, st_lock: threading.Lock | None = None
+    ) -> None:
+        """Processa UM documento — chamado de dentro de uma worker thread.
+
+        `frontier` e `store` ja sao seguros entre threads (locks proprios,
+        ver `frontier.py`/`store.py`); o unico estado compartilhado que resta
+        aqui e' o objeto `st` (contadores agregados de TODAS as threads), por
+        isso as mutacoes nele — e so elas — ficam atras de `st_lock`.
+        """
+        st_lock = st_lock or threading.Lock()
+
         if not rec.candidate_urls:
             self.frontier.mark(rec.key, STATUS_SKIPPED, error="sem URL de download")
             self.store.append_reject(rec, "sem_url")
-            st.rejeitados += 1
+            with st_lock:
+                st.rejeitados += 1
             return
 
         etag, last_mod = self.frontier.conditional_headers(rec.key)
@@ -198,7 +269,8 @@ class Pipeline:
 
             if res.from_cache:
                 self.frontier.mark(rec.key, STATUS_UNCHANGED, fetched_at=utcnow_iso())
-                st.inalterados += 1
+                with st_lock:
+                    st.inalterados += 1
                 return
 
             if not res.ok:
@@ -217,7 +289,6 @@ class Pipeline:
             wrapper = res.kind if (is_text and res.kind in ("html", "xml")) else None
 
             sha, path, novo_em_disco = self.store.put(res.body, res.kind, text=is_text)
-            st.bytes_baixados += len(res.body)
 
             n_pages = count_pdf_pages(path) if res.kind == "pdf" else None
             # Caminho RELATIVO a raiz do corpus: torna o acervo portatil.
@@ -226,14 +297,15 @@ class Pipeline:
                 sha, rel, res.kind, len(res.body), rec.key, n_pages
             )
 
-            if is_text:
-                st.texto_ja_extraido += 1
-
             status = STATUS_STORED if conteudo_novo else STATUS_DUPLICATE
-            if conteudo_novo:
-                st.armazenados += 1
-            else:
-                st.duplicados += 1
+            with st_lock:
+                st.bytes_baixados += len(res.body)
+                if is_text:
+                    st.texto_ja_extraido += 1
+                if conteudo_novo:
+                    st.armazenados += 1
+                else:
+                    st.duplicados += 1
 
             self.frontier.mark(
                 rec.key,
@@ -263,4 +335,5 @@ class Pipeline:
 
         self.frontier.mark(rec.key, STATUS_FAILED, error=last_error, fetched_at=utcnow_iso())
         self.store.append_reject(rec, "falha_download", detalhe=last_error)
-        st.falhos += 1
+        with st_lock:
+            st.falhos += 1

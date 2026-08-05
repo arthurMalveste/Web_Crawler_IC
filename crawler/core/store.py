@@ -13,12 +13,15 @@ O que se publica no relatorio sao os metadados e os identificadores persistentes
 from __future__ import annotations
 
 import json
+import threading
+import uuid
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
 import structlog
 
+from .concurrency import KeyedLock
 from .record import DocumentRecord, sha256_bytes
 
 log = structlog.get_logger(__name__)
@@ -35,6 +38,15 @@ class Store:
         self.rejects_path = self.root / "rejects.jsonl"
         for d in (self.raw, self.text):
             d.mkdir(parents=True, exist_ok=True)
+        # Harvest paralelo pode gravar o MESMO conteudo (mesmo SHA-256) vindo
+        # de duas fontes ao mesmo tempo — e' justamente o caso que deduplica.
+        # Um lock por sha serializa so essas duas threads entre si; conteudos
+        # diferentes gravam em paralelo sem se esperar.
+        self._content_locks = KeyedLock()
+        # `manifest.jsonl`/`rejects.jsonl` sao arquivos unicos, compartilhados
+        # por toda thread — um lock global aqui, mas cada escrita e' uma linha
+        # JSON pequena, entao a serializacao custa nada perto do download.
+        self._append_lock = threading.Lock()
 
     def path_for(self, sha: str, kind: str | None, text: bool = False) -> Path:
         base = self.text if text else self.raw
@@ -63,16 +75,26 @@ class Store:
         return p if p.is_absolute() else self.root / p
 
     def put(self, body: bytes, kind: str | None, *, text: bool = False) -> tuple[str, Path, bool]:
-        """Grava e devolve (sha256, caminho, era_novo)."""
+        """Grava e devolve (sha256, caminho, era_novo).
+
+        Travado por SHA: sem isso, duas threads baixando o mesmo conteudo ao
+        mesmo tempo (o cenario normal de deduplicacao entre fontes, agora
+        rodando de fato em paralelo) escreveriam no MESMO nome de arquivo
+        temporario e uma delas perderia a corrida — `tmp.replace(path)`
+        falhando com "arquivo nao encontrado" porque a outra ja o consumiu. O
+        nome do temporario tambem leva um sufixo unico, defesa extra caso um
+        processo anterior tenha deixado um `.part` orfao para tras.
+        """
         sha = sha256_bytes(body)
         path = self.path_for(sha, kind, text=text)
-        if path.exists() and path.stat().st_size == len(body):
-            return sha, path, False
-        path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = path.with_suffix(path.suffix + ".part")
-        tmp.write_bytes(body)
-        tmp.replace(path)
-        return sha, path, True
+        with self._content_locks.get(sha):
+            if path.exists() and path.stat().st_size == len(body):
+                return sha, path, False
+            path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = path.with_name(f"{path.name}.{uuid.uuid4().hex[:8]}.part")
+            tmp.write_bytes(body)
+            tmp.replace(path)
+            return sha, path, True
 
     # ------------------------------------------------------------- manifesto
 
@@ -96,10 +118,13 @@ class Store:
             )
         self._append(self.rejects_path, entry)
 
-    @staticmethod
-    def _append(path: Path, entry: dict[str, Any]) -> None:
-        with open(path, "a", encoding="utf-8") as fh:
-            fh.write(json.dumps(entry, ensure_ascii=False, sort_keys=True) + "\n")
+    def _append(self, path: Path, entry: dict[str, Any]) -> None:
+        linha = json.dumps(entry, ensure_ascii=False, sort_keys=True) + "\n"
+        # Threads diferentes abrindo o MESMO arquivo em modo "a" cada uma por
+        # sua conta podem intercalar escritas; o lock garante uma linha JSON
+        # inteira por vez.
+        with self._append_lock, open(path, "a", encoding="utf-8") as fh:
+            fh.write(linha)
 
 
 def count_pdf_pages(path: Path) -> int | None:

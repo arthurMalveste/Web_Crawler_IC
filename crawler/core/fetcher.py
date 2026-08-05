@@ -24,6 +24,7 @@ import httpx
 import structlog
 import yaml
 
+from .concurrency import KeyedLock, KeyedSemaphore
 from .env import carregar_dotenv, expandir_arvore, resolver_caminho
 
 log = structlog.get_logger(__name__)
@@ -120,6 +121,21 @@ class Config:
 
 
 class Fetcher:
+    """Um downloader, politicas por dominio — thread-safe por HOST.
+
+    `harvest` roda varias threads simultaneas (uma por documento em voo), e
+    cada uma pode mirar um host diferente. O isolamento certo e por chave de
+    host, nao um lock global: dois documentos do mesmo dominio DEVEM esperar a
+    vez um do outro (e' o que respeita `rate`/`concurrency`); dois documentos de
+    dominios diferentes NAO devem se esperar — e' esse paralelismo que reduz
+    coleta de horas para minutos. `KeyedLock`/`KeyedSemaphore` (concurrency.py)
+    dao exatamente essa granularidade.
+
+    `httpx.Client` em si ja e' seguro para uso concorrente entre threads: o
+    pool de conexoes por baixo (httpcore) foi desenhado para isso, entao uma
+    unica instancia e' compartilhada por todas as threads sem lock adicional.
+    """
+
     def __init__(self, config: Config, client: httpx.Client | None = None):
         self.config = config
         self._client = client or httpx.Client(
@@ -132,6 +148,15 @@ class Fetcher:
         # Preenchido a partir dos headers X-RateLimit-*: quando o servidor diz
         # quanto resta, obedecemos ao servidor em vez do palpite do YAML.
         self._rate_pause_until: dict[str, float] = {}
+        # Um lock por host protege as tres estruturas acima (a decisao de
+        # pacing/robots precisa ser "ler e escrever" atomico, senao duas
+        # threads do mesmo host podem ambas decidir que ja passou tempo
+        # suficiente e disparar juntas). Um semaforo por host limita quantos
+        # downloads daquele dominio ficam em voo ao mesmo tempo — e o
+        # `DomainPolicy.concurrency` que o YAML ja declarava sem que nada o
+        # lesse ate agora.
+        self._host_locks = KeyedLock()
+        self._host_semaphores = KeyedSemaphore()
 
     def close(self) -> None:
         self._client.close()
@@ -148,38 +173,51 @@ class Fetcher:
         return BROWSER_UA if policy.browser_ua else (policy.user_agent or BROWSER_UA)
 
     def _throttle(self, host: str, policy: DomainPolicy) -> None:
-        now = time.monotonic()
-        pause_until = self._rate_pause_until.get(host, 0.0)
-        earliest = max(self._last_hit.get(host, 0.0) + policy.rate, pause_until)
-        if earliest > now:
-            time.sleep(earliest - now)
-        self._last_hit[host] = time.monotonic()
+        # Ler o ultimo hit, decidir quanto dormir e gravar o novo hit precisa
+        # ser atomico por host: sem o lock, duas threads do MESMO host podem
+        # ler "faz tempo que ninguem bate aqui" ao mesmo tempo e disparar
+        # juntas, violando o `rate` configurado. O sleep acontece DENTRO do
+        # lock de proposito — so outras threads do MESMO host ficam paradas
+        # esperando a vez (no maximo `policy.concurrency` delas existem
+        # simultaneamente, ver `fetch`); threads de outros hosts nunca tocam
+        # este lock e seguem livres.
+        with self._host_locks.get(host):
+            now = time.monotonic()
+            pause_until = self._rate_pause_until.get(host, 0.0)
+            earliest = max(self._last_hit.get(host, 0.0) + policy.rate, pause_until)
+            if earliest > now:
+                time.sleep(earliest - now)
+            self._last_hit[host] = time.monotonic()
 
     def _robots_allows(self, url: str, policy: DomainPolicy) -> bool:
         if not policy.respect_robots:
             return True
         parts = urlsplit(url)
         host = parts.netloc.lower()
-        if host not in self._robots:
-            rp: robotparser.RobotFileParser | None = robotparser.RobotFileParser()
-            robots_url = f"{parts.scheme}://{host}/robots.txt"
-            try:
-                r = self._client.get(
-                    robots_url,
-                    headers={"User-Agent": self._ua(policy)},
-                    timeout=20.0,
-                )
-                if r.status_code == 200:
-                    rp.parse(r.text.splitlines())
-                else:
-                    # Sem robots.txt legivel -> sem restricao declarada.
+        # Mesmo lock por host do `_throttle`: aqui protege o preenchimento do
+        # cache de robots.txt, para duas threads chegando juntas num host novo
+        # nao dispararem a mesma consulta em duplicidade.
+        with self._host_locks.get(host):
+            if host not in self._robots:
+                rp: robotparser.RobotFileParser | None = robotparser.RobotFileParser()
+                robots_url = f"{parts.scheme}://{host}/robots.txt"
+                try:
+                    r = self._client.get(
+                        robots_url,
+                        headers={"User-Agent": self._ua(policy)},
+                        timeout=20.0,
+                    )
+                    if r.status_code == 200:
+                        rp.parse(r.text.splitlines())
+                    else:
+                        # Sem robots.txt legivel -> sem restricao declarada.
+                        rp = None
+                except httpx.HTTPError as exc:
+                    log.warning("robots.indisponivel", host=host, error=str(exc))
                     rp = None
-            except httpx.HTTPError as exc:
-                log.warning("robots.indisponivel", host=host, error=str(exc))
-                rp = None
-            self._robots[host] = rp
-            log.info("robots.carregado", host=host, presente=rp is not None)
-        rp = self._robots[host]
+                self._robots[host] = rp
+                log.info("robots.carregado", host=host, presente=rp is not None)
+            rp = self._robots[host]
         if rp is None:
             return True
         return rp.can_fetch(self._ua(policy), url)
@@ -196,7 +234,8 @@ class Fetcher:
             return
         if rem <= 5:
             wait = max(0.0, rst - time.time())
-            self._rate_pause_until[host] = time.monotonic() + wait
+            with self._host_locks.get(host):
+                self._rate_pause_until[host] = time.monotonic() + wait
             log.warning("ratelimit.quase_esgotado", host=host, restante=rem, espera_s=round(wait, 1))
 
     # ------------------------------------------------------------------ fetch
@@ -235,97 +274,104 @@ class Fetcher:
         delay = policy.backoff_base_s
         last_exc: Exception | None = None
 
-        for attempt in range(1, policy.retries + 1):
-            self._throttle(host, policy)
-            try:
-                with self._client.stream(
-                    "GET", url, headers=headers, timeout=policy.timeout_s
-                ) as resp:
-                    self._note_rate_headers(host, resp.headers)
+        # Teto de downloads simultaneos PARA ESTE HOST — e' o
+        # `DomainPolicy.concurrency` do YAML. Cobre as tentativas inteiras
+        # (throttle + rede), nao so uma tentativa: e' "quantos documentos deste
+        # dominio ficam em voo ao mesmo tempo" que a politica limita, retry
+        # incluso. Threads mirando OUTRO host nunca disputam este semaforo.
+        sem = self._host_semaphores.get(host, policy.concurrency)
+        with sem:
+            for attempt in range(1, policy.retries + 1):
+                self._throttle(host, policy)
+                try:
+                    with self._client.stream(
+                        "GET", url, headers=headers, timeout=policy.timeout_s
+                    ) as resp:
+                        self._note_rate_headers(host, resp.headers)
 
-                    if resp.status_code == 304:
-                        return FetchResult(url, 304, None, None, etag, last_modified, True)
+                        if resp.status_code == 304:
+                            return FetchResult(url, 304, None, None, etag, last_modified, True)
 
-                    if resp.status_code == 429 or resp.status_code >= 500:
-                        retry_after = resp.headers.get("retry-after")
-                        wait = _parse_retry_after(retry_after) or delay
-                        log.warning(
-                            "fetch.retry",
-                            url=url,
-                            status=resp.status_code,
-                            tentativa=attempt,
-                            espera_s=round(wait, 1),
-                        )
-                        resp.close()
-                        if attempt == policy.retries:
+                        if resp.status_code == 429 or resp.status_code >= 500:
+                            retry_after = resp.headers.get("retry-after")
+                            wait = _parse_retry_after(retry_after) or delay
+                            log.warning(
+                                "fetch.retry",
+                                url=url,
+                                status=resp.status_code,
+                                tentativa=attempt,
+                                espera_s=round(wait, 1),
+                            )
+                            resp.close()
+                            if attempt == policy.retries:
+                                return FetchResult(url, resp.status_code, None, None)
+                            time.sleep(wait)
+                            delay = min(delay * 2, policy.backoff_max_s)
+                            continue
+
+                        if resp.status_code != 200:
                             return FetchResult(url, resp.status_code, None, None)
-                        time.sleep(wait)
-                        delay = min(delay * 2, policy.backoff_max_s)
-                        continue
 
-                    if resp.status_code != 200:
-                        return FetchResult(url, resp.status_code, None, None)
-
-                    declared = resp.headers.get("content-length")
-                    if declared and int(declared) > max_bytes:
-                        resp.close()
-                        raise BlockedByPolicy(
-                            f"excede teto de {policy.max_file_mb} MB "
-                            f"(Content-Length={int(declared) / 1e6:.1f} MB)"
-                        )
-
-                    # Le em streaming e aborta se estourar tamanho ou tempo — o
-                    # Content-Length pode estar ausente ou mentir, e o timeout
-                    # do httpx nao cobre transferencia lenta e continua.
-                    chunks: list[bytes] = []
-                    total = 0
-                    inicio = time.monotonic()
-                    for chunk in resp.iter_bytes(1 << 16):
-                        total += len(chunk)
-                        if total > max_bytes:
+                        declared = resp.headers.get("content-length")
+                        if declared and int(declared) > max_bytes:
                             resp.close()
                             raise BlockedByPolicy(
-                                f"excede teto de {policy.max_file_mb} MB durante o download"
+                                f"excede teto de {policy.max_file_mb} MB "
+                                f"(Content-Length={int(declared) / 1e6:.1f} MB)"
                             )
-                        decorrido = time.monotonic() - inicio
-                        if decorrido > policy.max_download_s:
-                            resp.close()
-                            raise BlockedByPolicy(
-                                f"download excedeu {policy.max_download_s:.0f} s "
-                                f"({total / 1e6:.1f} MB recebidos)"
-                            )
-                        chunks.append(chunk)
-                    body = b"".join(chunks)
 
-                    kind = sniff_kind(body, resp.headers.get("content-type"))
-                    if expect_document and kind not in ("pdf", "zip", "ole", "text"):
-                        raise NotADocument(
-                            f"conteudo nao e documento (kind={kind}, "
-                            f"content-type={resp.headers.get('content-type')})"
+                        # Le em streaming e aborta se estourar tamanho ou tempo — o
+                        # Content-Length pode estar ausente ou mentir, e o timeout
+                        # do httpx nao cobre transferencia lenta e continua.
+                        chunks: list[bytes] = []
+                        total = 0
+                        inicio = time.monotonic()
+                        for chunk in resp.iter_bytes(1 << 16):
+                            total += len(chunk)
+                            if total > max_bytes:
+                                resp.close()
+                                raise BlockedByPolicy(
+                                    f"excede teto de {policy.max_file_mb} MB durante o download"
+                                )
+                            decorrido = time.monotonic() - inicio
+                            if decorrido > policy.max_download_s:
+                                resp.close()
+                                raise BlockedByPolicy(
+                                    f"download excedeu {policy.max_download_s:.0f} s "
+                                    f"({total / 1e6:.1f} MB recebidos)"
+                                )
+                            chunks.append(chunk)
+                        body = b"".join(chunks)
+
+                        kind = sniff_kind(body, resp.headers.get("content-type"))
+                        if expect_document and kind not in ("pdf", "zip", "ole", "text"):
+                            raise NotADocument(
+                                f"conteudo nao e documento (kind={kind}, "
+                                f"content-type={resp.headers.get('content-type')})"
+                            )
+
+                        return FetchResult(
+                            url=str(resp.url),
+                            status=200,
+                            body=body,
+                            kind=kind,
+                            etag=resp.headers.get("etag"),
+                            last_modified=resp.headers.get("last-modified"),
+                            headers=dict(resp.headers),
                         )
 
-                    return FetchResult(
-                        url=str(resp.url),
-                        status=200,
-                        body=body,
-                        kind=kind,
-                        etag=resp.headers.get("etag"),
-                        last_modified=resp.headers.get("last-modified"),
-                        headers=dict(resp.headers),
-                    )
+                except (BlockedByPolicy, NotADocument):
+                    raise
+                except httpx.HTTPError as exc:
+                    last_exc = exc
+                    log.warning("fetch.erro_rede", url=url, tentativa=attempt, error=str(exc))
+                    if attempt == policy.retries:
+                        break
+                    time.sleep(delay)
+                    delay = min(delay * 2, policy.backoff_max_s)
 
-            except (BlockedByPolicy, NotADocument):
-                raise
-            except httpx.HTTPError as exc:
-                last_exc = exc
-                log.warning("fetch.erro_rede", url=url, tentativa=attempt, error=str(exc))
-                if attempt == policy.retries:
-                    break
-                time.sleep(delay)
-                delay = min(delay * 2, policy.backoff_max_s)
-
-        log.error("fetch.falhou", url=url, error=str(last_exc))
-        return FetchResult(url, 0, None, None)
+            log.error("fetch.falhou", url=url, error=str(last_exc))
+            return FetchResult(url, 0, None, None)
 
     def policy_for(self, host: str) -> DomainPolicy:
         return self.config.policy_for(host)

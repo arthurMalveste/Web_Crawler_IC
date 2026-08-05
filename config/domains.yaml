@@ -1,6 +1,10 @@
 # Politica de fetch. Um unico downloader, parametros por dominio.
 #
 # `rate` = segundos MINIMOS entre requisicoes ao dominio (nao req/s).
+# `concurrency` = quantos downloads DESSE dominio ficam em voo ao mesmo tempo.
+# `harvest` roda todos os dominios pendentes em paralelo; e' este numero,
+# aplicado por host no Fetcher, que impede qualquer dominio individual de
+# ultrapassar o combinado — nao um limite global do processo.
 # Valores derivados de limites publicados ou medidos, nao chutados.
 
 # Raiz do corpus — onde os arquivos baixados sao gravados.
