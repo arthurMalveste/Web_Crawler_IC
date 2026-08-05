@@ -13,6 +13,7 @@ revisitar o que ja foi visto.
 from __future__ import annotations
 
 import sqlite3
+import threading
 from contextlib import closing
 from dataclasses import dataclass
 from pathlib import Path
@@ -61,15 +62,31 @@ class CrawlURL:
 
 
 class URLFrontier:
+    """Fila de PAGINAS de uma fonte — SQLite, usada por varias threads durante
+    o rastreamento paralelo (ver `Crawler.crawl`).
+
+    Mesmo desenho de thread-safety de `core/frontier.py::Frontier`: uma unica
+    conexao, `check_same_thread=False`, e TODO acesso a `self.conn` serializado
+    atras de `self._lock` (`RLock` porque nao ha necessidade real de reentrancia
+    aqui hoje, mas mantem o mesmo padrao caso um metodo futuro chame outro).
+    O custo e' desprezivel — cada operacao e' um SELECT/UPDATE indexado de uma
+    linha, e o tempo real do rastreamento esta' na rede, nao no banco.
+    """
+
     def __init__(self, db_path: str | Path, source: str):
         self.source = source
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        self.conn = sqlite3.connect(self.db_path)
+        self.conn = sqlite3.connect(self.db_path, check_same_thread=False)
         self.conn.row_factory = sqlite3.Row
         self.conn.executescript(SCHEMA)
         self.conn.execute("PRAGMA journal_mode=WAL")
+        # Defesa contra contencao externa (outro processo lendo o mesmo banco);
+        # entre threads deste processo o `self._lock` ja evita a contencao
+        # antes de chegar ao SQLite.
+        self.conn.execute("PRAGMA busy_timeout=30000")
         self.conn.commit()
+        self._lock = threading.RLock()
 
     def close(self) -> None:
         self.conn.close()
@@ -101,7 +118,7 @@ class URLFrontier:
         alcancavel por um link muito relevante e informacao util.
         """
         url = canonical_url(url)
-        with closing(self.conn.cursor()) as cur:
+        with self._lock, closing(self.conn.cursor()) as cur:
             cur.execute(
                 "SELECT state, priority, depth FROM urls WHERE source = ? AND url = ?",
                 (self.source, url),
@@ -123,10 +140,13 @@ class URLFrontier:
                    VALUES (?,?,?,?,?,?,?,?,?)""",
                 (url, self.source, depth, priority, STATE_PENDING, kind, anchor, parent, utcnow_iso()),
             )
-        self.conn.commit()
+            self.conn.commit()
         return True
 
     def add_many(self, urls: list[CrawlURL]) -> int:
+        # Sem lock proprio: cada `add()` ja trava individualmente. Um lock
+        # aqui em volta do laco so serializaria threads diferentes chamando
+        # `add_many` sem necessidade nenhuma.
         novos = 0
         for u in urls:
             if self.add(
@@ -147,8 +167,29 @@ class URLFrontier:
             f"UPDATE urls SET state = ?, visited_at = ?{', ' + cols if cols else ''} "
             "WHERE source = ? AND url = ?"
         )
-        self.conn.execute(sql, [state, utcnow_iso(), *fields.values(), self.source, url])
-        self.conn.commit()
+        with self._lock:
+            self.conn.execute(sql, [state, utcnow_iso(), *fields.values(), self.source, url])
+            self.conn.commit()
+
+    def requeue_failed(self, kind: str | None = None) -> int:
+        """Devolve paginas `failed` desta fonte para `pending`.
+
+        Sem isso, uma falha transitoria durante o rastreamento (timeout
+        pontual, servidor em manutencao) marcava a URL como falha PARA SEMPRE
+        — `add()` so reabre URL em `STATE_PENDING` (ver docstring de `add`), e
+        o unico jeito de recuperar era `reset()`, que descarta TODO o
+        progresso, inclusive paginas ja visitadas com sucesso. Espelha
+        `core/frontier.py::Frontier.requeue_failed`.
+        """
+        sql = "UPDATE urls SET state = ?, error = NULL WHERE source = ? AND state = ?"
+        params: list[Any] = [STATE_PENDING, self.source, STATE_FAILED]
+        if kind:
+            sql += " AND kind = ?"
+            params.append(kind)
+        with self._lock:
+            cur = self.conn.execute(sql, params)
+            self.conn.commit()
+            return cur.rowcount
 
     # ------------------------------------------------------------------ leitura
 
@@ -159,6 +200,13 @@ class URLFrontier:
         estrategias com o mesmo codigo: no modo focado o LinkScorer atribui
         prioridades diferentes; no BFS todas valem 0 e a ordem cai para
         profundidade, que e exatamente busca em largura.
+
+        Chamado com `n` = tamanho do pool de threads durante o rastreamento
+        paralelo: as `n` linhas devolvidas sao distintas (`LIMIT` do SQL), e o
+        chamador so busca o proximo lote depois que TODAS as desta rodada
+        terminarem de ser visitadas (ver `Crawler.crawl`) — por isso nao ha
+        risco de duas threads receberem a mesma URL, mesmo sem "reservar" a
+        linha explicitamente.
         """
         sql = (
             "SELECT url, depth, priority, kind, anchor, parent FROM urls "
@@ -170,6 +218,8 @@ class URLFrontier:
             params.append(kind)
         sql += " ORDER BY priority DESC, depth ASC, rowid ASC LIMIT ?"
         params.append(n)
+        with self._lock:
+            linhas = self.conn.execute(sql, params).fetchall()
         return [
             CrawlURL(
                 url=r["url"],
@@ -179,34 +229,42 @@ class URLFrontier:
                 anchor=r["anchor"],
                 parent=r["parent"],
             )
-            for r in self.conn.execute(sql, params)
+            for r in linhas
         ]
 
     def known(self, url: str) -> bool:
-        cur = self.conn.execute(
-            "SELECT 1 FROM urls WHERE source = ? AND url = ?", (self.source, canonical_url(url))
-        )
-        return cur.fetchone() is not None
+        with self._lock:
+            cur = self.conn.execute(
+                "SELECT 1 FROM urls WHERE source = ? AND url = ?", (self.source, canonical_url(url))
+            )
+            return cur.fetchone() is not None
 
     def counts(self) -> dict[str, int]:
-        rows = self.conn.execute(
-            "SELECT state, COUNT(*) n FROM urls WHERE source = ? GROUP BY state", (self.source,)
-        )
+        with self._lock:
+            rows = self.conn.execute(
+                "SELECT state, COUNT(*) n FROM urls WHERE source = ? GROUP BY state", (self.source,)
+            ).fetchall()
         return {r["state"]: r["n"] for r in rows}
 
     def visited_pages(self) -> int:
-        row = self.conn.execute(
-            "SELECT COUNT(*) n FROM urls WHERE source = ? AND state = ? AND kind = ?",
-            (self.source, STATE_VISITED, KIND_PAGE),
-        ).fetchone()
+        with self._lock:
+            row = self.conn.execute(
+                "SELECT COUNT(*) n FROM urls WHERE source = ? AND state = ? AND kind = ?",
+                (self.source, STATE_VISITED, KIND_PAGE),
+            ).fetchone()
         return row["n"]
 
     def documents_found(self) -> Iterator[CrawlURL]:
-        for r in self.conn.execute(
-            "SELECT url, depth, priority, kind, anchor, parent FROM urls "
-            "WHERE source = ? AND kind = ? ORDER BY priority DESC",
-            (self.source, KIND_DOCUMENT),
-        ):
+        # Busca tudo travado e SO ENTAO libera o lock para devolver um a um —
+        # um generator que segurasse o lock durante toda a iteracao prenderia
+        # qualquer outra thread ate o consumidor terminar.
+        with self._lock:
+            linhas = self.conn.execute(
+                "SELECT url, depth, priority, kind, anchor, parent FROM urls "
+                "WHERE source = ? AND kind = ? ORDER BY priority DESC",
+                (self.source, KIND_DOCUMENT),
+            ).fetchall()
+        for r in linhas:
             yield CrawlURL(
                 url=r["url"],
                 depth=r["depth"],
@@ -219,5 +277,6 @@ class URLFrontier:
     def reset(self) -> None:
         """Zera a fronteira desta fonte — usado para reexecutar um experimento
         de rastreamento do zero (focado vs BFS na mesma fonte)."""
-        self.conn.execute("DELETE FROM urls WHERE source = ?", (self.source,))
-        self.conn.commit()
+        with self._lock:
+            self.conn.execute("DELETE FROM urls WHERE source = ?", (self.source,))
+            self.conn.commit()

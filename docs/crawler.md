@@ -86,7 +86,7 @@ A única diferença entre `focused` e `bfs` é o `LinkScorer` estar ligado. Com 
 python -m crawler.cli experiment rosap_crawl --max-pages 60
 ```
 
-Métrica: `harvest_rate` = documentos relevantes encontrados ÷ páginas HTML baixadas.
+Métrica: `harvest_rate` = documentos relevantes encontrados ÷ páginas HTML baixadas. "Relevante" aqui é o tier do léxico (indício de metadado), não verificação de que o documento é de fato um ConOps — não há gold set nesta etapa para confirmar isso. Tratar como sinal de engenharia (vale a pena pontuar links?), não como métrica de precisão.
 
 O sitemap é desligado no experimento, sempre: ele entrega URLs sem que nenhum link seja seguido, e as duas estratégias receberiam a mesma lista. O que está sob teste é a **ordem de expansão da fronteira**, e isso só aparece navegando.
 
@@ -102,9 +102,11 @@ Mesmo orçamento (79 páginas), mesma semente, sitemap desligado:
 | **Documentos relevantes** | **2** | **4** |
 | **`harvest_rate`** | **0,0253** | **0,0506** |
 
-**Ganho: 2,0×.** A curva de descoberta mostra as duas estratégias empatadas até ~49 páginas e divergindo depois — o crawler focado encontra 255 documentos até a página 73, contra 159 do BFS.
+**2,0× mais candidatos por página.** A curva de descoberta mostra as duas estratégias empatadas até ~49 páginas e divergindo depois — o crawler focado encontra 255 documentos até a página 73, contra 159 do BFS.
 
-**Ressalva honesta, a registrar no relatório:** os números absolutos são pequenos (2 contra 4 documentos relevantes). O resultado é *sugestivo*, não conclusivo — n=2 versus n=4 não sustenta afirmação estatística. Para o relatório final vale repetir com orçamento de várias centenas de páginas e em mais de uma fonte.
+**Duas ressalvas honestas, a registrar em qualquer relatório que cite este número:**
+1. Amostra pequena — 2 contra 4 documentos relevantes não sustenta afirmação estatística; repetir com orçamento de várias centenas de páginas e em mais de uma fonte antes de tratar como resultado forte.
+2. Não é medida de precisão — "relevante" é o tier do léxico sobre o metadado, não confirmação de que o documento é um ConOps de verdade. O número diz que o rastreamento focado acha mais *candidatos* por página, o que já é útil operacionalmente (completude sob orçamento limitado), mas não é prova de que a estratégia acerta mais.
 
 Vale também o contraexemplo: no teste controlado, quando o ramo relevante é o **primeiro** link da página, o BFS empata com o focado. O ganho aparece quando o conteúdo relevante está enterrado — que é o caso real dos portais institucionais, e por isso a FAA foi a fonte escolhida.
 

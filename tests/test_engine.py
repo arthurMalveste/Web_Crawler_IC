@@ -264,6 +264,35 @@ class TestURLFrontier:
         a.close()
         b.close()
 
+    def test_requeue_failed_reabre_so_as_falhas(self, tmp_path):
+        """Falha transitoria (timeout, manutencao do site) nao pode ficar
+        marcada `failed` para sempre — so `reset()` (que apaga tudo) recuperava
+        antes disso existir."""
+        f = URLFrontier(tmp_path / "u.sqlite", "s")
+        f.add("https://x.org/ok", depth=0)
+        f.add("https://x.org/falhou", depth=0)
+        f.mark("https://x.org/ok", "visited")
+        f.mark("https://x.org/falhou", "failed", error="timeout")
+
+        n = f.requeue_failed()
+        assert n == 1
+        pendentes = {u.url for u in f.next_batch(10)}
+        assert pendentes == {"https://x.org/falhou"}, "so a falha deveria voltar, nao a visitada"
+        assert f.counts().get("failed", 0) == 0
+        f.close()
+
+    def test_requeue_failed_filtra_por_kind(self, tmp_path):
+        f = URLFrontier(tmp_path / "u.sqlite", "s")
+        f.add("https://x.org/pagina", depth=0, kind=KIND_PAGE)
+        f.add("https://x.org/doc.pdf", depth=0, kind=KIND_DOCUMENT)
+        f.mark("https://x.org/pagina", "failed")
+        f.mark("https://x.org/doc.pdf", "failed")
+
+        n = f.requeue_failed(kind=KIND_PAGE)
+        assert n == 1
+        assert f.counts() == {"pending": 1, "failed": 1}
+        f.close()
+
 
 # ------------------------------------------------------------------ titulos
 

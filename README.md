@@ -41,7 +41,7 @@ A separação entre **descobrir** e **baixar** é o que permite ao mesmo núcleo
 
 ### Rastreamento focado (*"Web Crawling semântico"*)
 
-O crawler pontua cada link **antes de segui-lo** — tokens da URL, texto da âncora e contexto ao redor — e expande primeiro o que promete mais. As duas estratégias (`focused` e `bfs`) compartilham todo o código; a única diferença é o pontuador estar ligado, de modo que a comparação entre elas seja legítima:
+O crawler pontua cada link **antes de segui-lo** — tokens da URL, texto da âncora e contexto ao redor — e expande primeiro o que promete mais. As duas estratégias (`focused` e `bfs`) compartilham todo o código; a única diferença é o pontuador estar ligado, o que isola essa variável na comparação (ver ressalva sobre o que ela mede, abaixo):
 
 ```bash
 python -m crawler.cli experiment rosap_crawl --max-pages 60
@@ -83,20 +83,24 @@ python -m crawler.cli report --data-root D:/outro/Corpus            # ou por fla
 ## Uso
 
 ```bash
-# Descoberta — só metadados, barata, reexecutável à vontade
+# Descoberta — só metadados, barata, reexecutável à vontade. Paralela por host.
 python -m crawler.cli discover ntrs  --year-start 2015 --year-end 2026   # API
 python -m crawler.cli discover rosap --max-pages 40                      # OAI-PMH
 python -m crawler.cli discover faa   --max-pages 200                     # crawler
 python -m crawler.cli discover psas  --max-pages 120                     # hard negatives
 
-# Rastreamento focado vs BFS na mesma fonte — resultado reportável
+# Todas as fontes configuradas numa invocação só — uma que falhar não trava as outras
+python -m crawler.cli discover-all
+
+# Rastreamento focado vs BFS na mesma fonte — leitura diagnóstica, não prova de precisão
 python -m crawler.cli experiment faa --max-pages 200
 
-# Coleta — só aqui gasta banda e disco
+# Coleta — só aqui gasta banda e disco. Paralela por domínio.
 python -m crawler.cli harvest --tier strong weak --limit 100
 
-# Reenfileirar falhos (após corrigir o coletor ou depois de erro de rede)
+# Reenfileirar falhos: harvest (documentos) ou descoberta (páginas), após corrigir o coletor
 python -m crawler.cli retry-failed
+python -m crawler.cli discover faa --retry-failed
 
 # Métricas
 python -m crawler.cli report
@@ -122,7 +126,7 @@ Quatro números sustentam as decisões de arquitetura:
 
 - **O pré-filtro evita a maior parte do tráfego.** No ROSA P, 4.000 metadados foram varridos em ~40 s e 3.583 PDFs não precisaram ser baixados.
 - **O `links.fulltext` do NTRS barateia a Etapa 2.** 87% dos documentos do NTRS chegaram como texto já extraído, ocupando 13 MB — os mesmos em PDF ocupariam ordens de grandeza mais e exigiriam extração.
-- **O rastreamento focado dobrou o rendimento.** Na FAA, com orçamento idêntico de 79 páginas: `harvest_rate` 0,0506 (focado) contra 0,0253 (BFS) — **ganho de 2,0×**. Ressalva: números absolutos pequenos (4 contra 2 documentos relevantes); é sugestivo, não conclusivo. Ver [docs/crawler.md](docs/crawler.md).
+- **O rastreamento focado achou mais candidatos sob o mesmo orçamento.** Na FAA, com 79 páginas: `harvest_rate` 0,0506 (focado) contra 0,0253 (BFS) — 2,0× mais candidatos por página. Leitura diagnóstica, não prova de precisão: "relevante" aqui é o tier do léxico, não verificação de que o documento é de fato um ConOps, e a amostra é pequena (4 contra 2). Ver [docs/crawler.md](docs/crawler.md).
 - **Sitemap, quando existe, dispensa navegar.** A FAA entregou 4.175 URLs em poucas requisições.
 
 Idempotência verificada em produção: reexecutar a descoberta no mesmo escopo devolveu **377 vistos, 0 novos**.

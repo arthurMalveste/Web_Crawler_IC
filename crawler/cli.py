@@ -34,6 +34,8 @@ from .core.record import TIER_HARD_NEGATIVE, TIER_NEGATIVE, TIER_STRONG, TIER_WE
 from .core.store import Store
 from .engine.spec import STRATEGY_BFS, STRATEGY_FOCUSED, SourceSpec
 
+log = structlog.get_logger(__name__)
+
 ROOT = Path(__file__).resolve().parent.parent
 CONFIG_DIR = ROOT / "config"
 SOURCES_DIR = CONFIG_DIR / "sources"
@@ -123,6 +125,8 @@ def make_adapter(name: str, fetcher, lexicon: Lexicon, args: argparse.Namespace)
         lexicon=lexicon,
         frontier_db=data_root / "urlfrontier.sqlite",
         reset=getattr(args, "reset", False),
+        retry_failed=getattr(args, "retry_failed", False),
+        max_workers=getattr(args, "workers", None),
     )
 
 
@@ -135,6 +139,70 @@ def cmd_discover(args: argparse.Namespace) -> int:
         if isinstance(adapter, CrawlAdapter) and adapter.stats:
             saida["rastreamento"] = adapter.stats.as_dict()
     print(json.dumps(saida, indent=2, ensure_ascii=False))
+    return 0
+
+
+def _args_para_fonte(nome: str, base: argparse.Namespace) -> argparse.Namespace:
+    """Namespace de `discover` para UMA fonte, dentro de `discover-all`.
+
+    Cada fonte usa SEUS PROPRIOS defaults (do YAML ou do adapter) — nao
+    tentamos impor `max-pages`/`year-start`/etc. igual pra todas; isso e' o
+    que `discover <fonte> --max-pages N` continua servindo para ajuste fino.
+    """
+    return argparse.Namespace(
+        adapter=nome,
+        limit=getattr(base, "limit", None),
+        terms=None,
+        year_start=1960,
+        year_end=datetime.now().year,
+        from_date=None,
+        until_date=None,
+        max_pages=None,
+        max_depth=None,
+        strategy=None,
+        reset=False,
+        retry_failed=getattr(base, "retry_failed", False),
+        no_render=False,
+        no_sitemap=False,
+        workers=getattr(base, "workers", None),
+        data_root=base.data_root,
+        no_negatives=base.no_negatives,
+        verbose=base.verbose,
+    )
+
+
+def cmd_discover_all(args: argparse.Namespace) -> int:
+    """Roda `discover` em TODAS as fontes configuradas, uma de cada vez.
+
+    Existe porque cobrir as 9 fontes hoje (7 YAML + ntrs + rosap) exigia 9
+    invocacoes manuais — facil de esquecer uma. Uma fonte que falha (servidor
+    fora do ar, por exemplo) nao pode travar a cobertura das outras: captura,
+    loga, segue para a proxima.
+    """
+    fontes = ["ntrs", "rosap"] + (sorted(p.stem for p in SOURCES_DIR.glob("*.yaml")) if SOURCES_DIR.exists() else [])
+    if args.only:
+        fontes = [f for f in fontes if f in args.only]
+    if args.skip:
+        fontes = [f for f in fontes if f not in args.skip]
+
+    resultados: dict[str, Any] = {}
+    for nome in fontes:
+        print(f"=== {nome} ===")
+        try:
+            sub_args = _args_para_fonte(nome, args)
+            _, lexicon, store, frontier, fetcher, pipeline = build(sub_args)
+            with fetcher, frontier:
+                adapter = make_adapter(nome, fetcher, lexicon, sub_args)
+                stats = pipeline.discover(adapter, limit=sub_args.limit)
+                saida: dict[str, Any] = {"descoberta": stats.as_dict()}
+                if isinstance(adapter, CrawlAdapter) and adapter.stats:
+                    saida["rastreamento"] = adapter.stats.as_dict()
+                resultados[nome] = saida
+        except Exception as exc:
+            log.error("discover_all.falhou", fonte=nome, error=str(exc))
+            resultados[nome] = {"erro": str(exc)}
+
+    print(json.dumps(resultados, indent=2, ensure_ascii=False))
     return 0
 
 
@@ -152,10 +220,12 @@ def cmd_harvest(args: argparse.Namespace) -> int:
 def cmd_experiment(args: argparse.Namespace) -> int:
     """Rastreamento focado vs BFS na MESMA fonte, com orcamento identico.
 
-    Responde, com numero, se pontuar links antes de segui-los vale a pena. As
-    duas execucoes compartilham todo o codigo: a unica diferenca e o LinkScorer
-    estar ligado ou desligado. A fronteira de URLs e zerada entre elas, senao a
-    segunda herdaria o trabalho da primeira e a comparacao seria fraudulenta.
+    Da uma leitura diagnostica de se pontuar links antes de segui-los muda
+    quantos candidatos aparecem sob o mesmo orcamento — NAO e' prova de
+    precisao: "relevante" aqui e' so o tier do lexico, sem verificacao contra
+    verdade nenhuma. As duas execucoes compartilham todo o codigo: a unica
+    diferenca e o LinkScorer estar ligado ou desligado. A fronteira de URLs e
+    zerada entre elas, senao a segunda herdaria o trabalho da primeira.
     """
     # O sitemap e desligado no experimento, sempre. Ele entrega URLs sem que
     # nenhum link seja seguido — as duas estrategias receberiam exatamente a
@@ -289,18 +359,40 @@ def main(argv: list[str] | None = None) -> int:
         help="sobrepoe a estrategia do SourceSpec",
     )
     d.add_argument("--reset", action="store_true", help="zerar a fronteira de URLs antes")
+    d.add_argument(
+        "--retry-failed",
+        action="store_true",
+        help="reabrir paginas 'failed' desta fonte antes de rastrear (ignorado se --reset)",
+    )
     d.add_argument("--no-render", action="store_true", help="desligar Playwright nesta execucao")
     d.add_argument("--no-sitemap", action="store_true", help="forcar navegacao em vez de sitemap")
+    d.add_argument(
+        "--workers",
+        type=int,
+        help="threads simultaneas no rastreamento HTML (padrao: concorrencia configurada do host)",
+    )
     d.set_defaults(func=cmd_discover)
+
+    da = sub.add_parser(
+        "discover-all",
+        help="rodar 'discover' em todas as fontes configuradas, uma de cada vez",
+    )
+    da.add_argument("--limit", type=int, help="teto por fonte")
+    da.add_argument("--only", nargs="*", help="rodar so estas fontes")
+    da.add_argument("--skip", nargs="*", help="pular estas fontes")
+    da.add_argument("--retry-failed", action="store_true", help="reabrir paginas 'failed' em cada fonte")
+    da.add_argument("--workers", type=int, help="threads simultaneas por fonte (crawl)")
+    da.set_defaults(func=cmd_discover_all)
 
     e = sub.add_parser(
         "experiment",
-        help="rastreamento focado vs BFS na mesma fonte — metrica reportavel",
+        help="rastreamento focado vs BFS na mesma fonte — leitura diagnostica, nao comparacao validada",
     )
     e.add_argument("adapter")
     e.add_argument("--max-pages", type=int, default=150)
     e.add_argument("--max-depth", type=int)
     e.add_argument("--no-render", action="store_true")
+    e.add_argument("--workers", type=int, help="threads simultaneas (padrao: concorrencia do host)")
     e.set_defaults(func=cmd_experiment)
 
     h = sub.add_parser("harvest", help="baixar o que a fila aprovou (paralelo por dominio)")

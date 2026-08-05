@@ -735,8 +735,8 @@ sitemap: auto                       # tentar sitemap antes de navegar</code></pr
   <td>Não se sabe que fração dos <code>strong</code> é realmente ConOps, nem quanto dos <code>weak</code> se aproveita. Exigiria revisão manual de ~100 itens de cada faixa.</td>
 </tr>
 <tr>
-  <td><strong>Experimento com amostra pequena</strong></td><td><span class="pill parc">MÉDIA</span></td>
-  <td>O ganho de 2,0× do rastreamento focado baseia-se em 4 contra 2 documentos relevantes. Sugestivo, não conclusivo.</td>
+  <td><strong>Comparação focado vs BFS é diagnóstica, não validada</strong></td><td><span class="pill parc">MÉDIA</span></td>
+  <td>O comando <code>experiment</code> mede quantos candidatos aparecem sob o mesmo orçamento (4 contra 2 documentos relevantes na medição registrada), mas "relevante" aqui é só o tier do léxico — não há verificação de que o documento é de fato um ConOps. Serve como sinal de engenharia (vale a pena pontuar links?), não como resultado a reportar como prova de precisão.</td>
 </tr>
 <tr>
   <td><strong>Etapa 2 ausente</strong></td><td><span class="pill parc">MÉDIA</span></td>
@@ -746,14 +746,14 @@ sitemap: auto                       # tentar sitemap antes de navegar</code></pr
 
 <h3>12.2 Limitações técnicas</h3>
 <ul>
-  <li><strong>Sem paralelismo.</strong> A configuração prevê um campo de concorrência por domínio, mas o downloader é sequencial. Coletar milhares de documentos leva horas que poderiam ser minutos. O SQLite com escritor único também limita quanto se pode paralelizar sem mudar a arquitetura de estado.</li>
   <li><strong>Corpo inteiro carregado em memória.</strong> O teto de 60 MB por arquivo protege, mas um documento grande ocupa toda a sua memória durante o download em vez de ser gravado em fluxo.</li>
   <li><strong>Deduplicação apenas exata.</strong> Dois PDFs do mesmo documento com um byte de diferença (metadado de geração, marca d'água, versão reexportada) contam como documentos distintos. Falta deduplicação aproximada por similaridade.</li>
   <li><strong>Sem detecção de PDF escaneado.</strong> Um PDF que contém só imagens passará adiante e produzirá texto vazio na Etapa 2, sem aviso.</li>
   <li><strong>Pontuador de links é léxico, não semântico.</strong> "Web Crawling semântico" está implementado na estrutura (o pontuador existe e funciona), mas a pontuação ainda é casamento de termos, não similaridade vetorial. A ponte para a Etapa 4 está desenhada, não construída.</li>
-  <li><strong>Cobertura de testes não medida formalmente.</strong> São 124 testes e a proporção de código de teste para produção é boa (1.716 para 3.903 linhas), mas não há relatório de cobertura.</li>
+  <li><strong>Cobertura de testes não medida formalmente.</strong> São 174 testes, mas não há relatório de cobertura.</li>
   <li><strong>O <em>job</em> semanal do NTRS não está agendado.</strong> O comando existe, mas depende de execução manual — e os termos de uso o exigem periodicamente.</li>
 </ul>
+<p class="legenda">O paralelismo por domínio (harvest e, desde esta revisão, também o rastreamento HTML) já está implementado — não é mais uma limitação.</p>
 
 <h3>12.3 Limitações das fontes (fora do controle do projeto)</h3>
 <ul>
@@ -798,11 +798,8 @@ sitemap: auto                       # tentar sitemap antes de navegar</code></pr
 </ol>
 
 <h3>Prioridade 3 — Eficiência</h3>
+<p class="legenda">Paralelismo por domínio — item antes listado aqui — já foi implementado: harvest e rastreamento HTML rodam vários hosts simultaneamente, cada um respeitando seu próprio limite de taxa (<code>rate</code>/<code>concurrency</code> de <code>domains.yaml</code>, mais <code>Crawl-delay</code>/<code>Request-rate</code> do robots.txt quando declarado). Restam:</p>
 <ol start="7">
-  <li>
-    <strong>Paralelismo por domínio.</strong> Baixar de várias fontes simultaneamente, respeitando o limite de taxa de cada uma independentemente.
-    <br><em>Ganho estimado:</em> de horas para minutos numa coleta completa. Requer revisar o acesso concorrente ao SQLite.
-  </li>
   <li>
     <strong>Gravação em fluxo</strong> em vez de carregar o corpo inteiro em memória.
   </li>
@@ -815,7 +812,7 @@ sitemap: auto                       # tentar sitemap antes de navegar</code></pr
 </ol>
 
 <h3>Prioridade 4 — Ponte com as etapas seguintes</h3>
-<ol start="11">
+<ol start="10">
   <li>
     <strong>Pontuador de links por <em>embeddings</em>.</strong> Assim que a Etapa 4 produzir o modelo BERT, substituir a pontuação léxica por similaridade vetorial entre o contexto do link e um protótipo de ConOps.
     <br><em>Por quê:</em> é o que torna o "<em>Web Crawling</em> semântico" semântico de fato, fecha um ciclo entre as etapas e reaproveita o modelo. Bom material de artigo.
@@ -849,16 +846,23 @@ copy .env.example .env                                    # config desta máquin
 python -m crawler.cli discover ntrs  --year-start 2015 --year-end 2026
 python -m crawler.cli discover rosap --max-pages 40 --from 2026-01-01
 
-# Fontes com SourceSpec (rastreamento)
+# Fontes com SourceSpec (rastreamento — paralelo por host)
 python -m crawler.cli discover faa        --max-pages 200
 python -m crawler.cli discover psas       --max-pages 120
 python -m crawler.cli discover esa_cosmos --max-pages 300
 
-# Opções úteis
+# Todas as fontes configuradas de uma vez — uma que falhar nao trava as outras
+python -m crawler.cli discover-all
+python -m crawler.cli discover-all --only faa dtic --limit 500
+python -m crawler.cli discover-all --skip esa_eof
+
+# Opções úteis (discover)
   --reset          zerar a fronteira de URLs antes (recomeçar do zero)
+  --retry-failed   reabrir paginas 'failed' antes de rastrear (nao apaga o que ja funcionou)
   --strategy bfs   forçar busca em largura
   --no-sitemap     forçar navegação em vez de usar o sitemap
   --no-render      desligar Playwright nesta execução
+  --workers N      threads simultaneas (padrao: concorrencia configurada do host)
   --limit N        parar após N candidatos novos</code></pre>
 
 <h3>Coleta (gasta banda e disco)</h3>
@@ -884,7 +888,7 @@ python -m crawler.cli sync-ntrs --since 2026-07-28      # exigido pelos termos d
 <tr><td><code>crawler/core/</code></td><td>Núcleo: registro, pré-filtro, <em>fetch</em>, fila, armazenamento, orquestração</td></tr>
 <tr><td><code>crawler/engine/</code></td><td>Motor de rastreamento</td></tr>
 <tr><td><code>crawler/adapters/</code></td><td>Um adaptador por tipo de fonte</td></tr>
-<tr><td><code>tests/</code></td><td>140 testes e <em>fixtures</em> gravadas</td></tr>
+<tr><td><code>tests/</code></td><td>174 testes e <em>fixtures</em> gravadas</td></tr>
 <tr><td><code>docs/</code></td><td>Achados de campo e documentação do motor</td></tr>
 <tr><td><code>reports/</code></td><td>Métricas datadas de cada execução</td></tr>
 <tr><td><code>CONOPS_DATA_ROOT</code></td><td>O corpus — fora do repositório e fora do OneDrive, para não sincronizar dezenas de GB. Padrão: <code>../ConOpsCorpus</code></td></tr>

@@ -22,6 +22,7 @@ LinkScorer.
 from __future__ import annotations
 
 import re
+import threading
 from collections import Counter
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
@@ -106,18 +107,27 @@ class HostBudget:
 
     O orcamento do SourceSpec vale para a fonte inteira; este vale por host e
     impede que um unico dominio consuma tudo quando o escopo permite varios.
+
+    `.allow()` e' ler-e-incrementar — nao atomico por si so. Com o rastreamento
+    paralelo, varias threads do MESMO `Crawler` chamam isso ao mesmo tempo;
+    sem o lock, duas poderiam ler a mesma contagem antes de qualquer uma
+    incrementar e as duas passariam, furando o teto. Um `Lock` simples (nao por
+    host) basta: todas as threads aqui pertencem ao mesmo `Crawler`, entao a
+    contencao e' pequena e a operacao e' so um `dict`+comparacao.
     """
 
     def __init__(self, max_por_host: int):
         self.max_por_host = max_por_host
         self._contagem: Counter[str] = Counter()
+        self._lock = threading.Lock()
 
     def allow(self, url: str) -> bool:
         host = urlsplit(url).netloc.lower()
-        if self._contagem[host] >= self.max_por_host:
-            return False
-        self._contagem[host] += 1
-        return True
+        with self._lock:
+            if self._contagem[host] >= self.max_por_host:
+                return False
+            self._contagem[host] += 1
+            return True
 
     @property
     def counts(self) -> dict[str, int]:

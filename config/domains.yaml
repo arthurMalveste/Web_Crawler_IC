@@ -49,12 +49,14 @@ domains:
     concurrency: 2
 
   # Sem limite publicado nos bulk dumps; sao poucos arquivos grandes.
+  # concurrency elevado para 3 em 2026-08-05, a titulo de experimento — ver
+  # nota geral abaixo, junto de apps.dtic.mil.
   data.europa.eu:
     rate: 1.0
-    concurrency: 1
+    concurrency: 3
   cordis.europa.eu:
     rate: 2.0
-    concurrency: 1
+    concurrency: 3
 
   # ---------------------------------------------------------------------
   # EXCECAO DE USER-AGENT — decisao do projeto, registrada no relatorio.
@@ -74,33 +76,52 @@ domains:
   # A excecao e restrita a estes dois hosts. Todo o resto do projeto continua
   # usando o UA identificado com contato institucional.
   # ---------------------------------------------------------------------
+  #
+  # EXPERIMENTO 2026-08-05: concurrency subiu de 1 para 3 em todos os hosts
+  # abaixo que nao tinham limite publicado (decisao do operador, registrada
+  # aqui). `rate` continua o mesmo — o que muda e' quantas conexoes ficam em
+  # voo ao mesmo tempo, nao o intervalo entre inicios de requisicao.
+  # RISCO CONHECIDO em apps.dtic.mil e (www.)faa.gov especificamente: os dois
+  # estao atras de WAF (Akamai) e ja respondem 403 a UA nao-navegador: varias
+  # conexoes simultaneas do mesmo cliente e' sinal classico de bot, e pode
+  # levar o WAF a bloquear em vez de so responder mais devagar. Se aparecer
+  # 403/429 novo ou queda no rendimento apos essa mudanca, volte concurrency
+  # para 1 nestes dois hosts primeiro.
   apps.dtic.mil:
     rate: 3.0
-    concurrency: 1
+    concurrency: 3
     browser_ua: true
     playwright_fallback: true
 
   www.faa.gov:
     rate: 4.0          # mais conservador: e o dominio de maior volume potencial
-    concurrency: 1
+    concurrency: 3
     browser_ua: true
   faa.gov:
     rate: 4.0
-    concurrency: 1
+    concurrency: 3
     browser_ua: true
 
+  # ATENCAO: os seeds de esa_cosmos.yaml usam "www.cosmos.esa.int", nao
+  # "cosmos.esa.int" — sem a entrada abaixo com "www.", esta politica nunca
+  # era de fato aplicada ao rastreamento real (caia no default). Corrigido
+  # junto com a subida de concurrency, senao o experimento nao testaria nada.
   cosmos.esa.int:
     rate: 2.0
-    concurrency: 1
+    concurrency: 3
+    max_depth: 3
+  www.cosmos.esa.int:
+    rate: 2.0
+    concurrency: 3
     max_depth: 3
 
   psas.scripts.mit.edu:
     rate: 1.0
-    concurrency: 1
+    concurrency: 3
 
   sunnyday.mit.edu:
     rate: 1.0
-    concurrency: 1
+    concurrency: 3
 
 # Dominios que o coletor NUNCA acessa, mesmo que apareca link.
 # Nao e otimizacao: e restricao juridica/etica registrada no relatorio.

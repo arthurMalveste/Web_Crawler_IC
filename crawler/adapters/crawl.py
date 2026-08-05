@@ -32,6 +32,8 @@ class CrawlAdapter(BaseAdapter):
         lexicon: Lexicon,
         frontier_db: str | Path,
         reset: bool = False,
+        retry_failed: bool = False,
+        max_workers: int | None = None,
         **options: Any,
     ):
         super().__init__(fetcher, **options)
@@ -41,6 +43,12 @@ class CrawlAdapter(BaseAdapter):
         self.lexicon = lexicon
         self.frontier_db = Path(frontier_db)
         self.reset = reset
+        #: Reabre paginas `failed` antes de rastrear de novo — recupera de
+        #: falha transitoria (timeout, manutencao do site) sem descartar o
+        #: progresso inteiro como `reset` faria. Ignorado se `reset` tambem
+        #: estiver ligado (reset ja apaga tudo, tornar isso redundante).
+        self.retry_failed = retry_failed
+        self.max_workers = max_workers
         self.stats: CrawlStats | None = None
 
     def discover(self) -> Iterator[DocumentRecord]:
@@ -51,11 +59,18 @@ class CrawlAdapter(BaseAdapter):
             # Reexecutar um experimento (focado vs BFS) exige comecar do zero:
             # uma fronteira com URLs ja visitadas falsearia a comparacao.
             frontier.reset()
+        elif self.retry_failed:
+            n = frontier.requeue_failed()
+            if n:
+                log.info("crawl.retry_failed", fonte=self.spec.name, reenfileiradas=n)
 
         try:
             if renderer is not None:
                 renderer.__enter__()
-            crawler = Crawler(self.spec, self.fetcher, self.lexicon, frontier, renderer=renderer)
+            crawler = Crawler(
+                self.spec, self.fetcher, self.lexicon, frontier,
+                renderer=renderer, max_workers=self.max_workers,
+            )
             yield from crawler.crawl()
             self.stats = crawler.stats
         finally:

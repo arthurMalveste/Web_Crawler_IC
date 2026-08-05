@@ -148,6 +148,12 @@ class Fetcher:
         # Preenchido a partir dos headers X-RateLimit-*: quando o servidor diz
         # quanto resta, obedecemos ao servidor em vez do palpite do YAML.
         self._rate_pause_until: dict[str, float] = {}
+        # Preenchido a partir de Crawl-delay/Request-rate do robots.txt: e' um
+        # PISO, nao uma substituicao do `rate` do YAML — usamos o maior dos
+        # dois. O YAML pode ser mais conservador que o site pede; nunca o
+        # contrario. Ver `_robots_allows` (onde e' lido) e `_throttle` (onde e'
+        # aplicado).
+        self._robots_delay: dict[str, float] = {}
         # Um lock por host protege as tres estruturas acima (a decisao de
         # pacing/robots precisa ser "ler e escrever" atomico, senao duas
         # threads do mesmo host podem ambas decidir que ja passou tempo
@@ -184,7 +190,14 @@ class Fetcher:
         with self._host_locks.get(host):
             now = time.monotonic()
             pause_until = self._rate_pause_until.get(host, 0.0)
-            earliest = max(self._last_hit.get(host, 0.0) + policy.rate, pause_until)
+            # O maior entre tres pisos: o `rate` do YAML, uma pausa que o
+            # servidor pediu via header (X-RateLimit-*), e o Crawl-delay/
+            # Request-rate que o proprio robots.txt declarou. Nenhum dos tres
+            # pode ser furado — so o YAML pode ser MAIS conservador que os
+            # outros dois.
+            delay_robots = self._robots_delay.get(host, 0.0)
+            ultimo = self._last_hit.get(host, 0.0)
+            earliest = max(ultimo + policy.rate, pause_until, ultimo + delay_robots)
             if earliest > now:
                 time.sleep(earliest - now)
             self._last_hit[host] = time.monotonic()
@@ -216,7 +229,13 @@ class Fetcher:
                     log.warning("robots.indisponivel", host=host, error=str(exc))
                     rp = None
                 self._robots[host] = rp
-                log.info("robots.carregado", host=host, presente=rp is not None)
+                self._robots_delay[host] = _crawl_delay(rp, self._ua(policy))
+                log.info(
+                    "robots.carregado",
+                    host=host,
+                    presente=rp is not None,
+                    crawl_delay_s=self._robots_delay[host] or None,
+                )
             rp = self._robots[host]
         if rp is None:
             return True
@@ -439,6 +458,32 @@ def sniff_kind(body: bytes, content_type: str | None) -> str:
         return "text"
     except UnicodeDecodeError:
         return "unknown"
+
+
+def _crawl_delay(rp: robotparser.RobotFileParser | None, ua: str) -> float:
+    """Converte `Crawl-delay`/`Request-rate` do robots.txt num intervalo
+    minimo, em segundos, entre requisicoes ao host.
+
+    0.0 quando o site nao declara nenhum dos dois (a maioria dos casos) ou nao
+    tem robots.txt legivel. Quando declara os dois, usa o mais conservador —
+    o site pode combinar as duas formas sem contradicao proposital.
+    """
+    if rp is None:
+        return 0.0
+    candidatos = [0.0]
+    try:
+        atraso = rp.crawl_delay(ua)
+        if atraso is not None:
+            candidatos.append(float(atraso))
+    except (TypeError, ValueError):
+        pass
+    try:
+        taxa = rp.request_rate(ua)
+        if taxa is not None and taxa.requests > 0:
+            candidatos.append(taxa.seconds / taxa.requests)
+    except (TypeError, ValueError, ZeroDivisionError, AttributeError):
+        pass
+    return max(candidatos)
 
 
 def _parse_retry_after(value: str | None) -> float | None:

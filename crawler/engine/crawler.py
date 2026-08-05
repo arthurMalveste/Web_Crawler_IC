@@ -19,7 +19,9 @@ focado com BFS so tem valor se as duas execucoes forem identicas em tudo o mais.
 from __future__ import annotations
 
 import re
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from typing import Any, Iterator
 from urllib.parse import urlsplit
@@ -50,9 +52,11 @@ log = structlog.get_logger(__name__)
 class CrawlStats:
     """Metricas do rastreamento.
 
-    `harvest_rate` e a metrica que compara focado com BFS: documentos
-    relevantes encontrados por pagina HTML baixada. E o numero que responde
-    "vale a pena pontuar links?".
+    `harvest_rate` — documentos relevantes por pagina HTML baixada — e' um
+    numero diagnostico util (se cai muito, orcamento esta indo pra lugar
+    errado), mas nao e' julgamento de precisao: "relevante" aqui e' so o
+    tier do lexico (indicio), nao verdade confirmada. Nao tratar como prova
+    de que uma estrategia de rastreamento e' melhor que outra.
     """
 
     paginas_baixadas: int = 0
@@ -90,6 +94,20 @@ class CrawlStats:
 
 
 class Crawler:
+    """Motor de rastreamento — visita paginas em paralelo por RODADAS.
+
+    A fronteira de paginas cresce durante o proprio rastreamento (ao contrario
+    do harvest, que parte de uma lista fechada), entao nao da pra materializar
+    tudo de uma vez no inicio. A solucao e' processar em lotes do tamanho do
+    pool: `next_batch(n)` devolve `n` linhas DISTINTAS (LIMIT do SQL), a rodada
+    inteira e' disparada em paralelo, e so quando TODAS terminam e' que a
+    proxima rodada busca mais — isso e' o que evita duas threads pegando a
+    mesma URL, sem precisar inventar semantica de "reserva" de linha no
+    SQLite. `Fetcher` ja aplica o teto de `rate`/`concurrency` por HOST (ver
+    `core/fetcher.py`), entao visitar paginas em paralelo herda o mesmo
+    respeito a cada dominio que os documentos do harvest ja tem.
+    """
+
     def __init__(
         self,
         spec: SourceSpec,
@@ -98,6 +116,7 @@ class Crawler:
         frontier: URLFrontier,
         *,
         renderer: Any | None = None,
+        max_workers: int | None = None,
     ):
         self.spec = spec
         self.fetcher = fetcher
@@ -107,6 +126,14 @@ class Crawler:
         self.scorer = LinkScorer(lexicon, enabled=spec.strategy == STRATEGY_FOCUSED)
         self.stats = CrawlStats()
         self._budget = HostBudget(spec.scope.max_pages)
+        self._max_workers_override = max_workers
+        # Protege os CONTADORES de `self.stats` (`+=` nao e' atomico) — nao os
+        # dicts abaixo, que nao precisam de lock: cada URL e' visitada por
+        # exatamente UMA thread, uma vez so (garantido pelas rodadas: uma
+        # chave nunca aparece em dois lotes, porque so vira PENDING de novo se
+        # falhar, e falha nao repete a visita na MESMA rodada). Duas threads
+        # escrevendo chaves DIFERENTES do mesmo dict e' seguro sem lock (GIL).
+        self._stats_lock = threading.Lock()
         # Metadados das paginas ja visitadas. Guardar aqui evita rebaixar a
         # mesma landing page duas vezes: o metadado que identifica o documento
         # (titulo, autores, resumo) esta na pagina que continha o link, e essa
@@ -121,22 +148,50 @@ class Crawler:
 
     # ------------------------------------------------------------------ ciclo
 
+    def _worker_count(self) -> int:
+        """Threads simultaneas para ESTE rastreamento.
+
+        Usa a concorrencia configurada do host da(s) semente(s) — o mesmo
+        teto que o `Fetcher` ja aplica por host de qualquer forma, entao abrir
+        mais threads que isso so as deixaria esperando a vez, sem acelerar
+        nada. Fontes com `render=True` (Playwright) ficam sempre em 1: a API
+        sincrona do Playwright nao foi desenhada para chamadas concorrentes de
+        `.render()` sobre o mesmo browser/context, e a unica fonte assim hoje
+        (ESA EOF) tem universo de so 34 documentos — nao ha nada a ganhar
+        arriscando isso.
+        """
+        if self.spec.render or not self.spec.seeds:
+            return 1
+        host = urlsplit(self.spec.seeds[0]).netloc.lower()
+        return max(1, min(self.fetcher.policy_for(host).concurrency, 32))
+
     def crawl(self) -> Iterator[DocumentRecord]:
         inicio = time.monotonic()
         self._semear()
 
-        while self.stats.paginas_baixadas < self.spec.scope.max_pages:
-            lote = self.frontier.next_batch(1, kind=KIND_PAGE)
-            if not lote:
-                break
-            self._visitar(lote[0])
+        n_workers = self._max_workers_override or self._worker_count()
+        with ThreadPoolExecutor(max_workers=n_workers, thread_name_prefix="discover") as pool:
+            while self.stats.paginas_baixadas < self.spec.scope.max_pages:
+                restante = self.spec.scope.max_pages - self.stats.paginas_baixadas
+                lote = self.frontier.next_batch(min(n_workers, restante), kind=KIND_PAGE)
+                if not lote:
+                    break
+                futuros = [pool.submit(self._visitar, alvo) for alvo in lote]
+                for fut in as_completed(futuros):
+                    fut.result()  # relanca excecao de alguma thread, se houve
 
         # Documentos descobertos durante a travessia viram registros no fim: o
         # rastreamento identifica enderecos, quem baixa e a camada de fetch.
         yield from self._emitir_documentos()
 
         self.stats.segundos = time.monotonic() - inicio
-        log.info("crawl.concluido", fonte=self.spec.name, estrategia=self.spec.strategy, **self.stats.as_dict())
+        log.info(
+            "crawl.concluido",
+            fonte=self.spec.name,
+            estrategia=self.spec.strategy,
+            workers=n_workers,
+            **self.stats.as_dict(),
+        )
 
     def _semear(self) -> None:
         for url in self.spec.seeds:
@@ -195,19 +250,22 @@ class Crawler:
             self.frontier.mark(alvo.url, STATE_SKIPPED, error=str(exc))
             return
         except Exception as exc:
-            self.stats.erros += 1
+            with self._stats_lock:
+                self.stats.erros += 1
             self.frontier.mark(alvo.url, STATE_FAILED, error=str(exc))
             log.warning("crawl.erro_pagina", url=alvo.url, error=str(exc))
             return
 
         if body is None:
-            self.stats.erros += 1
+            with self._stats_lock:
+                self.stats.erros += 1
             self.frontier.mark(alvo.url, STATE_FAILED, error="sem corpo")
             return
 
-        self.stats.paginas_baixadas += 1
-        if renderizado:
-            self.stats.paginas_renderizadas += 1
+        with self._stats_lock:
+            self.stats.paginas_baixadas += 1
+            if renderizado:
+                self.stats.paginas_renderizadas += 1
         self.frontier.mark(alvo.url, STATE_VISITED, http_status=200)
 
         soup = parse_html(body)
@@ -215,10 +273,11 @@ class Crawler:
         # A pagina pode ser, ela propria, uma landing page de documento: se o
         # <head> declara citation_pdf_url, o PDF esta identificado sem adivinhar.
         md = extract_metadata(soup, alvo.url)
-        self._page_meta[alvo.url] = md
+        self._page_meta[alvo.url] = md  # chave = alvo.url, unica desta thread — sem lock (ver __init__)
 
         self._expandir(soup, alvo)
-        self.stats.curva.append((self.stats.paginas_baixadas, self.stats.documentos_encontrados))
+        with self._stats_lock:
+            self.stats.curva.append((self.stats.paginas_baixadas, self.stats.documentos_encontrados))
 
         if md.pdf_url:
             score = self.scorer.score(md.pdf_url, anchor=md.title, depth=alvo.depth, is_document=True)
@@ -234,22 +293,26 @@ class Crawler:
 
     def _expandir(self, soup, alvo) -> None:
         links = extract_links(soup, alvo.url, self.spec.document_extensions)
-        self.stats.links_vistos += len(links)
+        with self._stats_lock:
+            self.stats.links_vistos += len(links)
         profundidade = alvo.depth + 1
         if profundidade > self.spec.scope.max_depth:
             return
 
+        # Chave = alvo.url, unica desta thread nesta rodada — sem lock.
         self._docs_por_pagina[alvo.url] = sum(
             1 for l in links if l.is_document or self.spec.is_document_url(l.url)
         )
 
         for link in links:
             if not self._em_escopo(link.url):
-                self.stats.fora_de_escopo += 1
+                with self._stats_lock:
+                    self.stats.fora_de_escopo += 1
                 continue
             motivo = is_trap(link.url)
             if motivo:
-                self.stats.armadilhas += 1
+                with self._stats_lock:
+                    self.stats.armadilhas += 1
                 continue
 
             # `extract_links` decide por extensao; o spec pode reconhecer
@@ -283,7 +346,8 @@ class Crawler:
         md: PageMetadata | None,
         matched: list[str] | None = None,
     ) -> None:
-        self.stats.documentos_encontrados += 1
+        with self._stats_lock:
+            self.stats.documentos_encontrados += 1
 
     # -------------------------------------------------------------- documentos
 

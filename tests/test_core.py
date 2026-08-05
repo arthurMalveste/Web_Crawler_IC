@@ -5,13 +5,15 @@ identidade por conteudo, idempotencia, respeito a politica — porque sao elas q
 sustentam a reprodutibilidade da Etapa 1.
 """
 
+import time
+import urllib.robotparser as robotparser
 from pathlib import Path
 
 import httpx
 import pytest
 import respx
 
-from crawler.core.fetcher import BlockedByPolicy, Config, Fetcher, NotADocument, sniff_kind
+from crawler.core.fetcher import BlockedByPolicy, Config, Fetcher, NotADocument, _crawl_delay, sniff_kind
 from crawler.core.frontier import (
     STATUS_DISCOVERED,
     STATUS_DUPLICATE,
@@ -152,6 +154,80 @@ class TestPoliticaDeFetch:
         )
         with pytest.raises(NotADocument):
             fetcher.fetch("https://ntrs.nasa.gov/a.pdf", expect_document=True)
+
+    @respx.mock
+    def test_crawl_delay_do_robots_e_respeitado(self):
+        """Crawl-delay do robots.txt e' um PISO: mesmo com `rate` do YAML bem
+        menor, duas requisicoes ao mesmo host nao podem ficar mais proximas
+        que o Crawl-delay declarado pelo site.
+
+        `Crawl-delay` no `robotparser` do stdlib so aceita INTEIRO
+        (`isdigit()`, sem fracao) — por isso o valor de teste e' 1, nao 0.4.
+        """
+        cfg = Config.load(ROOT / "config" / "domains.yaml")
+        cfg.defaults.update({"respect_robots": True, "rate": 0.05, "retries": 1})
+        cfg.domains["ntrs.nasa.gov"] = {"respect_robots": True, "rate": 0.05}
+        respx.get("https://ntrs.nasa.gov/robots.txt").mock(
+            return_value=httpx.Response(200, text="User-agent: *\nCrawl-delay: 1\n")
+        )
+        respx.get(url__startswith="https://ntrs.nasa.gov/").mock(
+            return_value=httpx.Response(200, content=PDF)
+        )
+        with Fetcher(cfg) as f:
+            f.fetch("https://ntrs.nasa.gov/a.pdf")
+            inicio = time.monotonic()
+            f.fetch("https://ntrs.nasa.gov/b.pdf")
+            decorrido = time.monotonic() - inicio
+        assert decorrido >= 0.9, f"esperou so {decorrido:.3f}s — Crawl-delay=1 do robots.txt nao foi respeitado"
+
+    @respx.mock
+    def test_yaml_mais_conservador_que_robots_txt_vence(self):
+        """O robots.txt nao pode tornar a coleta MAIS agressiva do que o YAML
+        curado a mao pede — so mais conservadora."""
+        cfg = Config.load(ROOT / "config" / "domains.yaml")
+        cfg.defaults.update({"respect_robots": True, "rate": 2.0, "retries": 1})
+        cfg.domains["ntrs.nasa.gov"] = {"respect_robots": True, "rate": 2.0}
+        respx.get("https://ntrs.nasa.gov/robots.txt").mock(
+            return_value=httpx.Response(200, text="User-agent: *\nCrawl-delay: 1\n")
+        )
+        respx.get(url__startswith="https://ntrs.nasa.gov/").mock(
+            return_value=httpx.Response(200, content=PDF)
+        )
+        with Fetcher(cfg) as f:
+            f.fetch("https://ntrs.nasa.gov/a.pdf")
+            inicio = time.monotonic()
+            f.fetch("https://ntrs.nasa.gov/b.pdf")
+            decorrido = time.monotonic() - inicio
+        assert decorrido >= 1.9, f"esperou so {decorrido:.3f}s — rate=2.0 do YAML deveria prevalecer sobre Crawl-delay=1"
+
+
+class TestCrawlDelayHelper:
+    """Testes rapidos (sem rede, sem sleep) da conversao Crawl-delay/
+    Request-rate -> intervalo minimo em segundos — `_crawl_delay()`."""
+
+    def test_sem_robots_e_zero(self):
+        assert _crawl_delay(None, "*") == 0.0
+
+    def test_sem_crawl_delay_nem_request_rate_e_zero(self):
+        rp = robotparser.RobotFileParser()
+        rp.parse(["User-agent: *", "Disallow: /admin"])
+        assert _crawl_delay(rp, "*") == 0.0
+
+    def test_le_crawl_delay(self):
+        rp = robotparser.RobotFileParser()
+        rp.parse(["User-agent: *", "Crawl-delay: 3"])
+        assert _crawl_delay(rp, "*") == 3.0
+
+    def test_le_request_rate_como_segundos_por_requisicao(self):
+        # "2 requisicoes a cada 10s" -> 5s de intervalo minimo.
+        rp = robotparser.RobotFileParser()
+        rp.parse(["User-agent: *", "Request-rate: 2/10"])
+        assert _crawl_delay(rp, "*") == 5.0
+
+    def test_usa_o_maior_quando_declara_os_dois(self):
+        rp = robotparser.RobotFileParser()
+        rp.parse(["User-agent: *", "Crawl-delay: 2", "Request-rate: 1/10"])
+        assert _crawl_delay(rp, "*") == 10.0
 
 
 class TestCanonicalizacaoDeUrl:
