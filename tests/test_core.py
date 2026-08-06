@@ -304,6 +304,22 @@ class TestIdempotencia:
         pipeline.harvest()
         assert list(frontier.pending()) == []
 
+    def test_pending_filtra_por_fonte(self, ambiente):
+        """`--source` no harvest precisa isolar UMA fonte sem tocar nas outras
+        — e o que permite testar/depurar fonte por fonte."""
+        _, frontier, _ = ambiente
+        frontier.add(make_rec("ntrs", "1", "https://ntrs.nasa.gov/a.pdf"))
+        frontier.add(make_rec("faa", "2", "https://faa.gov/b.pdf"))
+        frontier.add(make_rec("faa", "3", "https://faa.gov/c.pdf"))
+
+        so_ntrs = list(frontier.pending(source="ntrs"))
+        so_faa = list(frontier.pending(source="faa"))
+
+        assert [r.source for r in so_ntrs] == ["ntrs"]
+        assert {r.source for r in so_faa} == {"faa"}
+        assert len(so_faa) == 2
+        assert len(list(frontier.pending())) == 3
+
 
 class TestDeduplicacaoPorConteudo:
     @respx.mock

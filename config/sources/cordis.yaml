@@ -37,9 +37,17 @@ options:
     - reportSummaries
 
 scope:
+  # ec.europa.eu ERA permitido aqui de forma generica ate 2026-08-06. Como
+  # allow_hosts casa por SUFIXO (qualquer subdominio de ec.europa.eu conta),
+  # isso deixava o rastreador sair de CORDIS de verdade e vagar por sites
+  # institucionais sem relacao — audiovisual.ec.europa.eu,
+  # have-your-say.ec.europa.eu, kohesio.ec.europa.eu, euraxess.ec.europa.eu —
+  # medido ao vivo: 297 paginas, 819s, 113 erros e um 429 num orcamento de so
+  # 50 candidatos pedidos. Removido; se algum entregavel real precisar de um
+  # subdominio especifico de ec.europa.eu, adicionar SO esse subdominio aqui,
+  # nao o dominio inteiro.
   allow_hosts:
     - cordis.europa.eu
-    - ec.europa.eu
     - data.europa.eu
   deny_paths:
     - '/search'

@@ -212,7 +212,7 @@ def cmd_harvest(args: argparse.Namespace) -> int:
     if args.tier:
         tiers = [{"strong": TIER_STRONG, "weak": TIER_WEAK, "negative": TIER_NEGATIVE}[t] for t in args.tier]
     with fetcher, frontier:
-        stats = pipeline.harvest(limit=args.limit, tiers=tiers, max_workers=args.workers)
+        stats = pipeline.harvest(limit=args.limit, tiers=tiers, source=args.source, max_workers=args.workers)
     print(json.dumps(stats.as_dict(), indent=2, ensure_ascii=False))
     return 0
 
@@ -398,6 +398,7 @@ def main(argv: list[str] | None = None) -> int:
     h = sub.add_parser("harvest", help="baixar o que a fila aprovou (paralelo por dominio)")
     h.add_argument("--limit", type=int)
     h.add_argument("--tier", nargs="*", choices=["strong", "weak", "negative"])
+    h.add_argument("--source", help="restringir a UMA fonte (ex.: ntrs, rosap, faa, dtic...)")
     h.add_argument(
         "--workers",
         type=int,

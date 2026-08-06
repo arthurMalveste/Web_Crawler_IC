@@ -159,6 +159,7 @@ class Pipeline:
         self,
         limit: int | None = None,
         tiers: list[str] | None = None,
+        source: str | None = None,
         *,
         max_workers: int | None = None,
     ) -> HarvestStats:
@@ -181,11 +182,11 @@ class Pipeline:
         para abrir mais que isso.
         """
         run_id = f"harvest-{uuid.uuid4().hex[:8]}"
-        self.frontier.start_run(run_id, "harvest", {"limit": limit, "tiers": tiers})
+        self.frontier.start_run(run_id, "harvest", {"limit": limit, "tiers": tiers, "source": source})
         st = HarvestStats()
         st_lock = threading.Lock()
 
-        pendentes = list(self.frontier.pending(limit=limit, tiers=tiers))
+        pendentes = list(self.frontier.pending(limit=limit, tiers=tiers, source=source))
         st.tentados = len(pendentes)
 
         n_workers = max_workers or self._worker_count(pendentes)

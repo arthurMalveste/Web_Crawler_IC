@@ -186,7 +186,12 @@ class Frontier:
             self.conn.commit()
         return True
 
-    def pending(self, limit: int | None = None, tiers: list[str] | None = None) -> Iterator[DocumentRecord]:
+    def pending(
+        self,
+        limit: int | None = None,
+        tiers: list[str] | None = None,
+        source: str | None = None,
+    ) -> Iterator[DocumentRecord]:
         """Candidatos ainda nao baixados. E daqui que a retomada funciona.
 
         Busca todas as linhas ja travado e SO ENTAO libera o lock para
@@ -194,12 +199,19 @@ class Frontier:
         longo de toda a iteracao prenderia qualquer outra thread ate quem
         estiver consumindo terminar — inclusive threads de harvest tentando
         gravar resultado no meio da leitura.
+
+        `source` filtra por UMA fonte (`ntrs`, `rosap`, ou o nome de um
+        `SourceSpec` em `config/sources/`) — util para testar/depurar uma
+        fonte de cada vez sem que o `limit` global seja consumido por outra.
         """
         sql = "SELECT record_json FROM documents WHERE status = ?"
         params: list[Any] = [STATUS_DISCOVERED]
         if tiers:
             sql += f" AND tier IN ({','.join('?' * len(tiers))})"
             params.extend(tiers)
+        if source:
+            sql += " AND source = ?"
+            params.append(source)
         sql += " ORDER BY lexicon_score DESC"
         if limit:
             sql += f" LIMIT {int(limit)}"
