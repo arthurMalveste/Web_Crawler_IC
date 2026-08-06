@@ -4,6 +4,7 @@ lxml==5.3.0
 PyYAML==6.0.2
 structlog==24.4.0
 pypdf==5.1.0
+Flask==3.1.3  # painel web local (webui/) — camada de orquestracao, nao entra no coletor
 
 # OPCIONAL — renderizacao de paginas com JavaScript (ESA EOF) e geracao do PDF
 # da documentacao (docs/gerar_pdf.py). Fora da lista fixa de proposito: sao

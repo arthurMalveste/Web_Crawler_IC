@@ -1,0 +1,206 @@
+<title>Painel do Coletor — ConOps Etapa 1</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f7f7f5; --fg: #1f2328; --muted: #6b7280; --border: #d9dce1;
+    --accent: #2563eb; --accent-fg: #ffffff; --ok: #15803d; --err: #b91c1c;
+    --card: #ffffff;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #16181d; --fg: #e6e8eb; --muted: #9aa1ab; --border: #33373f; --card: #1e2127; }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 2rem; background: var(--bg); color: var(--fg);
+    font: 15px/1.5 -apple-system, Segoe UI, Roboto, sans-serif;
+  }
+  main { max-width: 920px; margin: 0 auto; }
+  h1 { font-size: 1.35rem; margin: 0 0 .25rem; }
+  p.sub { color: var(--muted); margin: 0 0 1.5rem; }
+  section {
+    background: var(--card); border: 1px solid var(--border); border-radius: 10px;
+    padding: 1.1rem 1.3rem; margin-bottom: 1.2rem;
+  }
+  h2 { font-size: 1rem; margin: 0 0 .8rem; }
+  table { width: 100%; border-collapse: collapse; font-size: .9rem; }
+  th, td { text-align: left; padding: .4rem .5rem; border-bottom: 1px solid var(--border); }
+  th { color: var(--muted); font-weight: 600; }
+  tr:last-child td { border-bottom: none; }
+  .controles { display: flex; align-items: center; gap: .8rem; flex-wrap: wrap; margin-top: 1rem; }
+  input[type="number"] { width: 6rem; padding: .35rem .5rem; border: 1px solid var(--border);
+    border-radius: 6px; background: transparent; color: var(--fg); }
+  label.inline { display: inline-flex; align-items: center; gap: .3rem; color: var(--muted); font-size: .88rem; }
+  button {
+    background: var(--accent); color: var(--accent-fg); border: none; border-radius: 6px;
+    padding: .5rem 1rem; font-size: .9rem; cursor: pointer;
+  }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  #erro {
+    background: #fee2e2; color: var(--err); border: 1px solid var(--err);
+    border-radius: 8px; padding: .6rem .9rem; margin-bottom: 1.2rem; font-size: .9rem;
+  }
+  #erro[hidden] { display: none; }
+  .badge { display: inline-block; padding: .1rem .55rem; border-radius: 999px; font-size: .78rem; font-weight: 600; }
+  .badge.rodando { background: #dbeafe; color: var(--accent); }
+  .badge.concluido { background: #dcfce7; color: var(--ok); }
+  .ocioso { color: var(--muted); margin: 0; }
+  pre.log {
+    background: #0e0f12; color: #d7dae0; padding: .8rem; border-radius: 8px;
+    max-height: 220px; overflow: auto; font-size: .78rem; white-space: pre-wrap; word-break: break-all;
+  }
+  .tiers { display: flex; gap: .8rem; }
+</style>
+
+<main>
+  <h1>Painel do Coletor — ConOps Etapa 1</h1>
+  <p class="sub">Interface local sobre a CLI existente (<code>crawler.cli</code>). Não decide o que é ConOps — só descobre e coleta o que já tem indício.</p>
+
+  <div id="erro" hidden></div>
+
+  <section>
+    <h2>Fontes</h2>
+    <table id="fontes">
+      <thead>
+        <tr><th></th><th>Fonte</th><th>Tipo</th><th>Taxa configurada</th><th>Na fila</th></tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+    <div class="controles">
+      <label class="inline">limite <input type="number" id="discover-limit" min="1" placeholder="sem teto"></label>
+      <button id="btn-discover">Descobrir selecionadas</button>
+    </div>
+  </section>
+
+  <section>
+    <h2>Coleta (harvest)</h2>
+    <p class="sub" style="margin-bottom:.6rem">Baixa tudo que já foi aprovado na descoberta — não filtra por fonte.</p>
+    <div class="controles">
+      <label class="inline">limite <input type="number" id="harvest-limit" min="1" placeholder="sem teto"></label>
+      <div class="tiers">
+        <label class="inline"><input type="checkbox" class="tier-check" value="strong" checked> strong</label>
+        <label class="inline"><input type="checkbox" class="tier-check" value="weak" checked> weak</label>
+        <label class="inline"><input type="checkbox" class="tier-check" value="negative"> negative</label>
+      </div>
+      <button id="btn-harvest">Coletar pendentes</button>
+    </div>
+  </section>
+
+  <section>
+    <h2>Execução</h2>
+    <div id="execucao"><p class="ocioso">Nenhuma execução ainda.</p></div>
+  </section>
+</main>
+
+<script>
+async function fetchJSON(url, opts) {
+  const res = await fetch(url, opts);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.erro || `erro HTTP ${res.status}`);
+  return data;
+}
+
+function mostrarErro(msg) {
+  const el = document.querySelector('#erro');
+  el.textContent = msg;
+  el.hidden = false;
+}
+function esconderErro() {
+  document.querySelector('#erro').hidden = true;
+}
+
+async function carregarFontes() {
+  const fontes = await fetchJSON('/api/sources');
+  const marcadas = new Set(fontesSelecionadas());
+  const tbody = document.querySelector('#fontes tbody');
+  tbody.innerHTML = '';
+  for (const f of fontes) {
+    const taxas = f.politicas.map(p => `${p.host}: ${p.rate_s}s/req · ${p.concurrency} simult.`).join(' · ') || '—';
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td><input type="checkbox" class="fonte-check" value="${f.nome}" ${marcadas.has(f.nome) ? 'checked' : ''}></td>
+      <td>${f.nome}</td>
+      <td>${f.tipo}</td>
+      <td>${taxas}</td>
+      <td>${f.documentos_na_fila}</td>`;
+    tbody.appendChild(tr);
+  }
+}
+
+function fontesSelecionadas() {
+  return [...document.querySelectorAll('.fonte-check:checked')].map(el => el.value);
+}
+
+async function iniciarDiscover() {
+  const sources = fontesSelecionadas();
+  const limitStr = document.querySelector('#discover-limit').value;
+  esconderErro();
+  try {
+    await fetchJSON('/api/discover', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sources, limit: limitStr ? Number(limitStr) : null }),
+    });
+    atualizar();
+  } catch (e) { mostrarErro(e.message); }
+}
+
+async function iniciarHarvest() {
+  const limitStr = document.querySelector('#harvest-limit').value;
+  const tiers = [...document.querySelectorAll('.tier-check:checked')].map(el => el.value);
+  esconderErro();
+  try {
+    await fetchJSON('/api/harvest', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ limit: limitStr ? Number(limitStr) : null, tiers }),
+    });
+    atualizar();
+  } catch (e) { mostrarErro(e.message); }
+}
+
+function renderStatus(s) {
+  const painel = document.querySelector('#execucao');
+  if (!s.ativo) {
+    painel.innerHTML = '<p class="ocioso">Nenhuma execução ainda.</p>';
+    return;
+  }
+  const badge = s.rodando
+    ? '<span class="badge rodando">rodando</span>'
+    : `<span class="badge concluido">concluído (código ${s.codigo_saida})</span>`;
+  const partes = [`<p><strong>${s.tipo}</strong> ${badge}</p>`];
+  if (s.fontes && s.fontes.length) partes.push(`<p>Fontes: ${s.fontes.join(', ')}</p>`);
+  partes.push(`<p>Iniciado em: ${new Date(s.iniciado_em).toLocaleTimeString()}</p>`);
+
+  if (s.tipo === 'discover') {
+    const linhas = s.fontes.map(f => {
+      const urls = f in s.urls_vasculhadas_por_fonte ? s.urls_vasculhadas_por_fonte[f] : '—';
+      return `<tr><td>${f}</td><td>${s.novos_candidatos_por_fonte[f] ?? 0}</td><td>${urls}</td></tr>`;
+    }).join('');
+    partes.push(`<table><thead><tr><th>Fonte</th><th>Novos candidatos</th><th>URLs vasculhadas</th></tr></thead><tbody>${linhas}</tbody></table>`);
+  } else {
+    const d = s.delta_status || {};
+    partes.push(`<table><thead><tr><th>Armazenados</th><th>Duplicados</th><th>Inalterados</th><th>Falhos</th></tr></thead>
+      <tbody><tr><td>${d.stored || 0}</td><td>${d.duplicate || 0}</td><td>${d.unchanged || 0}</td><td>${d.failed || 0}</td></tr></tbody></table>`);
+  }
+  partes.push(`<pre class="log">${(s.log_cauda || []).join('\n')}</pre>`);
+  painel.innerHTML = partes.join('');
+}
+
+async function atualizar() {
+  try {
+    const [status] = await Promise.all([fetchJSON('/api/status'), carregarFontes()]);
+    renderStatus(status);
+    const rodando = status.ativo && status.rodando;
+    document.querySelector('#btn-discover').disabled = rodando;
+    document.querySelector('#btn-harvest').disabled = rodando;
+  } catch (e) { mostrarErro(e.message); }
+}
+
+document.querySelector('#btn-discover').addEventListener('click', iniciarDiscover);
+document.querySelector('#btn-harvest').addEventListener('click', iniciarHarvest);
+
+atualizar();
+setInterval(atualizar, 3000);
+</script>

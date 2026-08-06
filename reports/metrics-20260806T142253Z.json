@@ -1,0 +1,20 @@
+{
+  "por_status": {
+    "discovered": 9,
+    "skipped": 1,
+    "stored": 10
+  },
+  "por_faixa": {
+    "negative_sample": 9,
+    "strong": 10,
+    "weak": 1
+  },
+  "por_fonte": {
+    "ntrs": 10,
+    "rosap": 10
+  },
+  "volume_gb": 0.001,
+  "conteudos_unicos": 10,
+  "conteudos_em_multiplas_fontes": 0,
+  "sobreposicao_por_par": {}
+}

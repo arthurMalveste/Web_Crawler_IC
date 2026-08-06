@@ -25,3 +25,7 @@ reports/*.tmp
 # segundos e pesado (centenas de KB). Versiona-lo so geraria diff gigante a
 # cada coleta.
 reports/corpus.html
+
+# Logs das execucoes disparadas pelo painel web (webui/) — artefato de
+# trabalho de UMA maquina, nao resultado a preservar.
+reports/webui-runs/

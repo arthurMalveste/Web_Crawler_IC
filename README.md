@@ -109,6 +109,18 @@ python -m crawler.cli report
 python -m crawler.cli sync-ntrs --since 2026-07-28
 ```
 
+### Painel web (opcional)
+
+Interface local sobre a mesma CLI: checkboxes de fonte para `discover` e
+métricas ao vivo (documentos novos, URLs vasculhadas, taxa configurada por
+fonte). Não substitui nem duplica lógica do coletor — só dispara os comandos
+acima como subprocesso e lê o SQLite que já existe. Ver
+[webui/README.md](webui/README.md).
+
+```bash
+python -m webui.app   # abre em http://127.0.0.1:5000
+```
+
 ## Resultados medidos (2026-08-04)
 
 **Corpus:** 1.799 candidatos descobertos em 5 fontes, 213 documentos coletados.
@@ -194,6 +206,7 @@ crawler/adapters/  ntrs, rosap, ...
 docs/         achados-api.md — divergências verificadas contra as APIs reais
 reports/      métricas datadas de cada execução
 tests/        fixtures gravadas
+webui/        painel web opcional — camada de orquestração sobre a CLI (ver webui/README.md)
 ```
 
 O corpus é gravado em `data_root` — configurado por `CONOPS_DATA_ROOT` no [.env](.env.example) —, **fora do repositório e fora do OneDrive** de propósito: dezenas de GB sincronizando travam o cliente e geram conflitos de arquivo.
