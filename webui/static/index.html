@@ -51,6 +51,10 @@
     max-height: 220px; overflow: auto; font-size: .78rem; white-space: pre-wrap; word-break: break-all;
   }
   .tiers { display: flex; gap: .8rem; }
+  .previa { margin-top: .8rem; padding-top: .8rem; border-top: 1px dashed var(--border); }
+  .previa .total { font-size: .95rem; margin: 0 0 .5rem; }
+  .previa .aviso { color: var(--err); font-size: .85rem; margin: 0 0 .5rem; }
+  td.num, th.num { text-align: right; }
 </style>
 
 <main>
@@ -63,7 +67,7 @@
     <h2>Fontes</h2>
     <table id="fontes">
       <thead>
-        <tr><th></th><th>Fonte</th><th>Tipo</th><th>Taxa configurada</th><th>Na fila</th></tr>
+        <tr><th></th><th>Fonte</th><th>Tipo</th><th>Taxa configurada</th><th class="num">Pendentes</th><th class="num">Armazenados</th></tr>
       </thead>
       <tbody></tbody>
     </table>
@@ -85,6 +89,7 @@
       </div>
       <button id="btn-harvest">Coletar pendentes</button>
     </div>
+    <div class="previa" id="previa-harvest"></div>
   </section>
 
   <section>
@@ -123,13 +128,37 @@ async function carregarFontes() {
       <td>${f.nome}</td>
       <td>${f.tipo}</td>
       <td>${taxas}</td>
-      <td>${f.documentos_na_fila}</td>`;
+      <td class="num">${f.pendentes}</td>
+      <td class="num">${f.armazenados}</td>`;
     tbody.appendChild(tr);
   }
 }
 
 function fontesSelecionadas() {
   return [...document.querySelectorAll('.fonte-check:checked')].map(el => el.value);
+}
+
+function tiersSelecionadas() {
+  return [...document.querySelectorAll('.tier-check:checked')].map(el => el.value);
+}
+
+async function atualizarPrevia() {
+  const tiers = tiersSelecionadas();
+  const qs = tiers.map(t => `tiers=${encodeURIComponent(t)}`).join('&');
+  const previa = await fetchJSON(`/api/harvest-preview${qs ? '?' + qs : ''}`);
+  const div = document.querySelector('#previa-harvest');
+  const partes = [];
+  if (tiers.length === 0) {
+    partes.push('<p class="aviso">Nenhuma faixa marcada — sem filtro, TODAS as faixas serão baixadas (mesmo comportamento de <code>harvest</code> sem <code>--tier</code>).</p>');
+  }
+  partes.push(`<p class="total"><strong>${previa.total}</strong> arquivo(s) serão baixados agora, se você clicar em "Coletar pendentes".</p>`);
+  const fontes = Object.entries(previa.por_fonte).sort((a, b) => b[1] - a[1]);
+  if (fontes.length) {
+    partes.push('<table><thead><tr><th>Fonte</th><th class="num">Serão baixados</th></tr></thead><tbody>' +
+      fontes.map(([f, n]) => `<tr><td>${f}</td><td class="num">${n}</td></tr>`).join('') +
+      '</tbody></table>');
+  }
+  div.innerHTML = partes.join('');
 }
 
 async function iniciarDiscover() {
@@ -148,7 +177,7 @@ async function iniciarDiscover() {
 
 async function iniciarHarvest() {
   const limitStr = document.querySelector('#harvest-limit').value;
-  const tiers = [...document.querySelectorAll('.tier-check:checked')].map(el => el.value);
+  const tiers = tiersSelecionadas();
   esconderErro();
   try {
     await fetchJSON('/api/harvest', {
@@ -183,6 +212,13 @@ function renderStatus(s) {
     const d = s.delta_status || {};
     partes.push(`<table><thead><tr><th>Armazenados</th><th>Duplicados</th><th>Inalterados</th><th>Falhos</th></tr></thead>
       <tbody><tr><td>${d.stored || 0}</td><td>${d.duplicate || 0}</td><td>${d.unchanged || 0}</td><td>${d.failed || 0}</td></tr></tbody></table>`);
+    const porFonte = Object.entries(s.delta_status_por_fonte || {});
+    if (porFonte.length) {
+      partes.push('<table><thead><tr><th>Fonte</th><th class="num">Armazenados</th><th class="num">Duplicados</th><th class="num">Inalterados</th><th class="num">Falhos</th></tr></thead><tbody>' +
+        porFonte.map(([f, ds]) =>
+          `<tr><td>${f}</td><td class="num">${ds.stored || 0}</td><td class="num">${ds.duplicate || 0}</td><td class="num">${ds.unchanged || 0}</td><td class="num">${ds.failed || 0}</td></tr>`
+        ).join('') + '</tbody></table>');
+    }
   }
   partes.push(`<pre class="log">${(s.log_cauda || []).join('\n')}</pre>`);
   painel.innerHTML = partes.join('');
@@ -190,7 +226,7 @@ function renderStatus(s) {
 
 async function atualizar() {
   try {
-    const [status] = await Promise.all([fetchJSON('/api/status'), carregarFontes()]);
+    const [status] = await Promise.all([fetchJSON('/api/status'), carregarFontes(), atualizarPrevia()]);
     renderStatus(status);
     const rodando = status.ativo && status.rodando;
     document.querySelector('#btn-discover').disabled = rodando;
@@ -200,6 +236,7 @@ async function atualizar() {
 
 document.querySelector('#btn-discover').addEventListener('click', iniciarDiscover);
 document.querySelector('#btn-harvest').addEventListener('click', iniciarHarvest);
+document.querySelectorAll('.tier-check').forEach(el => el.addEventListener('change', atualizarPrevia));
 
 atualizar();
 setInterval(atualizar, 3000);

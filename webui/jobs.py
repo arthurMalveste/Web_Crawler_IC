@@ -43,6 +43,7 @@ class _Job:
     log_path: Path
     baseline: dict[str, Any]  # totals() completo no instante do start
     baseline_visited: dict[str, int]  # por fonte de navegação, só para discover
+    baseline_por_fonte: dict[str, dict[str, int]]  # cruzamento fonte x status no instante do start
 
 
 _lock = threading.Lock()
@@ -86,6 +87,7 @@ def _start(
         LOG_DIR.mkdir(parents=True, exist_ok=True)
         log_path = LOG_DIR / f"{job_id}.log"
         baseline = metrics.totals(root)
+        baseline_por_fonte = metrics.counts_by_source_and_status(root)
 
         with open(log_path, "w", encoding="utf-8") as log_fh:
             process = subprocess.Popen(cmd, cwd=ROOT, stdout=log_fh, stderr=subprocess.STDOUT)
@@ -99,6 +101,7 @@ def _start(
             log_path=log_path,
             baseline=baseline,
             baseline_visited=baseline_visited,
+            baseline_por_fonte=baseline_por_fonte,
         )
         return job_id
 
@@ -140,6 +143,23 @@ def status() -> dict[str, Any]:
             for s in job.sources
             if s in job.baseline_visited
         }
+    elif job.kind == "harvest":
+        # Harvest processa fontes que nao foram escolhidas de antemao (nao ha
+        # checkbox de fonte no harvest — ver plano/README) — por isso aqui a
+        # lista de fontes mostradas eh descoberta NA HORA, cruzando o que
+        # mudou de status desde o inicio do job, nao uma lista fixa.
+        atual_por_fonte = metrics.counts_by_source_and_status(root)
+        delta_por_fonte: dict[str, dict[str, int]] = {}
+        for fonte in set(atual_por_fonte) | set(job.baseline_por_fonte):
+            antes = job.baseline_por_fonte.get(fonte, {})
+            depois = atual_por_fonte.get(fonte, {})
+            delta = {
+                k: depois.get(k, 0) - antes.get(k, 0) for k in set(antes) | set(depois)
+            }
+            delta = {k: v for k, v in delta.items() if v != 0}
+            if delta:
+                delta_por_fonte[fonte] = delta
+        resultado["delta_status_por_fonte"] = delta_por_fonte
     return resultado
 
 

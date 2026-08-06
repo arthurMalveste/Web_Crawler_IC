@@ -13,8 +13,21 @@ from __future__ import annotations
 
 import pytest
 
+from crawler.core.frontier import STATUS_DISCOVERED, STATUS_STORED, Frontier
+from crawler.core.record import TIER_NEGATIVE, TIER_STRONG, TIER_WEAK, DocumentRecord
 from webui import jobs, metrics
 from webui.app import app as flask_app
+
+
+def _rec(source: str, sid: str, tier: str = TIER_STRONG) -> DocumentRecord:
+    return DocumentRecord(
+        source=source,
+        source_id=sid,
+        title=f"documento {sid}",
+        landing_url=f"https://example.org/{source}/{sid}",
+        candidate_urls=[f"https://example.org/{source}/{sid}.pdf"],
+        tier=tier,
+    )
 
 
 class FakeProcess:
@@ -64,7 +77,8 @@ class TestMetrics:
 
     def test_fila_vazia_conta_zero_documentos(self, isolado):
         for f in metrics.list_sources():
-            assert f["documentos_na_fila"] == 0
+            assert f["pendentes"] == 0
+            assert f["armazenados"] == 0
 
     def test_ntrs_e_api_sem_navegacao_de_urls(self, isolado):
         ntrs = next(f for f in metrics.list_sources() if f["nome"] == "ntrs")
@@ -84,6 +98,57 @@ class TestMetrics:
         assert metrics.is_crawl_source("rosap") is False
         alguma_fonte_yaml = next(metrics.SOURCES_DIR.glob("*.yaml")).stem
         assert metrics.is_crawl_source(alguma_fonte_yaml) is True
+
+
+class TestCruzamentoFonteStatus:
+    def test_sem_banco_devolve_vazio(self, isolado):
+        assert metrics.counts_by_source_and_status(isolado) == {}
+
+    def test_cruza_fonte_e_status(self, isolado):
+        with Frontier(isolado / "frontier.sqlite") as f:
+            r1, r2, r3 = _rec("ntrs", "1"), _rec("ntrs", "2"), _rec("rosap", "9")
+            f.add(r1, status=STATUS_DISCOVERED)
+            f.add(r2, status=STATUS_DISCOVERED)
+            f.add(r3, status=STATUS_DISCOVERED)
+            f.mark(r1.key, STATUS_STORED)
+
+        cruzamento = metrics.counts_by_source_and_status(isolado)
+        assert cruzamento["ntrs"] == {STATUS_DISCOVERED: 1, STATUS_STORED: 1}
+        assert cruzamento["rosap"] == {STATUS_DISCOVERED: 1}
+
+    def test_list_sources_separa_pendentes_de_armazenados(self, isolado):
+        with Frontier(isolado / "frontier.sqlite") as f:
+            f.add(_rec("ntrs", "1"), status=STATUS_DISCOVERED)
+            r2 = _rec("ntrs", "2")
+            f.add(r2, status=STATUS_DISCOVERED)
+            f.mark(r2.key, STATUS_STORED)
+
+        ntrs = next(f for f in metrics.list_sources() if f["nome"] == "ntrs")
+        assert ntrs["pendentes"] == 1
+        assert ntrs["armazenados"] == 1
+
+
+class TestPendingBySource:
+    def test_filtra_pela_mesma_faixa_que_o_harvest_usaria(self, isolado):
+        with Frontier(isolado / "frontier.sqlite") as f:
+            f.add(_rec("ntrs", "1", tier=TIER_STRONG), status=STATUS_DISCOVERED)
+            f.add(_rec("ntrs", "2", tier=TIER_WEAK), status=STATUS_DISCOVERED)
+            f.add(_rec("rosap", "9", tier=TIER_NEGATIVE), status=STATUS_DISCOVERED)
+
+        assert metrics.pending_by_source(isolado, ["strong"]) == {"ntrs": 1}
+        assert metrics.pending_by_source(isolado, ["strong", "weak"]) == {"ntrs": 2}
+        assert metrics.pending_by_source(isolado, ["negative"]) == {"rosap": 1}
+
+    def test_sem_faixa_marcada_nao_filtra(self, isolado):
+        """Documenta o comportamento: nenhuma faixa = TODAS entram, igual a
+        `crawler.cli harvest` sem `--tier`. Não é um bug do painel."""
+        with Frontier(isolado / "frontier.sqlite") as f:
+            f.add(_rec("ntrs", "1", tier=TIER_STRONG), status=STATUS_DISCOVERED)
+            f.add(_rec("rosap", "9", tier=TIER_NEGATIVE), status=STATUS_DISCOVERED)
+
+        esperado = {"ntrs": 1, "rosap": 1}
+        assert metrics.pending_by_source(isolado, None) == esperado
+        assert metrics.pending_by_source(isolado, []) == esperado
 
 
 class TestJobsUmPorVez:
@@ -128,6 +193,30 @@ class TestJobsUmPorVez:
         assert s["fontes"] == []
         assert "novos_candidatos_por_fonte" not in s
 
+    def test_harvest_mostra_resultado_por_fonte(self, sem_subprocess, isolado):
+        # popula a fila ANTES do job comecar — vira a "baseline" (0 armazenados)
+        with Frontier(isolado / "frontier.sqlite") as f:
+            r1 = _rec("ntrs", "1")
+            f.add(r1, status=STATUS_DISCOVERED)
+
+        jobs.start_harvest(None, None)
+
+        # simula o subprocesso baixando o documento — o processo real faria
+        # isso via Pipeline.harvest(); aqui so mexemos direto no banco, o
+        # mesmo arquivo que um subprocesso de verdade estaria escrevendo.
+        with Frontier(isolado / "frontier.sqlite") as f:
+            f.mark(r1.key, STATUS_STORED)
+
+        s = jobs.status()
+        assert s["delta_status_por_fonte"] == {"ntrs": {STATUS_STORED: 1, STATUS_DISCOVERED: -1}}
+
+    def test_harvest_sem_mudanca_nao_lista_fonte(self, sem_subprocess, isolado):
+        with Frontier(isolado / "frontier.sqlite") as f:
+            f.add(_rec("ntrs", "1"), status=STATUS_DISCOVERED)
+        jobs.start_harvest(None, None)
+        s = jobs.status()
+        assert s["delta_status_por_fonte"] == {}
+
 
 class TestRotasFlask:
     @pytest.fixture
@@ -160,3 +249,19 @@ class TestRotasFlask:
         r = client.post("/api/discover", json={"sources": ["rosap"]})
         assert r.status_code == 409
         assert "erro" in r.get_json()
+
+    def test_harvest_preview_sem_pendentes(self, client):
+        r = client.get("/api/harvest-preview")
+        assert r.status_code == 200
+        assert r.get_json() == {"total": 0, "por_fonte": {}}
+
+    def test_harvest_preview_respeita_faixa_da_query_string(self, client, isolado):
+        with Frontier(isolado / "frontier.sqlite") as f:
+            f.add(_rec("ntrs", "1", tier=TIER_STRONG), status=STATUS_DISCOVERED)
+            f.add(_rec("rosap", "9", tier=TIER_NEGATIVE), status=STATUS_DISCOVERED)
+
+        r = client.get("/api/harvest-preview?tiers=strong")
+        assert r.get_json() == {"total": 1, "por_fonte": {"ntrs": 1}}
+
+        r = client.get("/api/harvest-preview")  # sem query string = sem filtro
+        assert r.get_json() == {"total": 2, "por_fonte": {"ntrs": 1, "rosap": 1}}

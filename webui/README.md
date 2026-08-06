@@ -39,11 +39,24 @@ devolve um erro em vez de disparar dois subprocessos.
   `Fetcher` respeita. É a taxa *declarada*, não a espera real medida em
   tempo real (isso exigiria instrumentação nova no `Fetcher`, fora de
   escopo aqui).
+- **Pendentes / Armazenados por fonte**, na tabela de Fontes — cruzamento
+  fonte×status lido direto do `frontier.sqlite` (`metrics.counts_by_source_and_status`).
+- **Prévia do harvest** ("N arquivos serão baixados agora"), por fonte,
+  recalculada a cada mudança nas caixas de faixa (`strong`/`weak`/`negative`)
+  — usa a MESMA consulta que `Pipeline.harvest()` de fato consome
+  (`Frontier.pending`, via `metrics.pending_by_source`), então não é uma
+  estimativa. Se nenhuma faixa estiver marcada, um aviso explícito lembra
+  que isso baixa TUDO sem filtro (mesmo comportamento de `harvest` sem
+  `--tier` na CLI).
 - **Documentos novos descobertos nesta execução**, por fonte — diferença de
   `frontier.sqlite` entre o início do job e agora.
 - **URLs vasculhadas nesta execução**, por fonte — só para fontes de
   navegação HTML (as que têm um YAML em `config/sources/`); fontes via API
   (NTRS, ROSA P) não têm essa noção e aparecem como "—".
+- **Resultado do harvest discriminado por fonte** (armazenados/duplicados/
+  inalterados/falhos) — a lista de fontes aqui não é fixa: aparece quem quer
+  que tenha mudado de status desde o início do job, mesmo sem checkbox de
+  fonte no harvest.
 - Cauda do log (`reports/webui-runs/<job_id>.log`) da execução em
   andamento/mais recente.
 

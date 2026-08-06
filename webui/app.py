@@ -34,6 +34,16 @@ def api_status():
     return jsonify(jobs.status())
 
 
+@app.get("/api/harvest-preview")
+def api_harvest_preview():
+    """Quantos documentos SERIAM baixados agora, por fonte, para as faixas
+    marcadas — mesma consulta que o harvest de fato usaria (ver
+    `metrics.pending_by_source`), não uma estimativa."""
+    tiers = request.args.getlist("tiers") or None
+    por_fonte = metrics.pending_by_source(metrics.data_root(), tiers)
+    return jsonify({"total": sum(por_fonte.values()), "por_fonte": por_fonte})
+
+
 @app.post("/api/discover")
 def api_discover():
     body = request.get_json(force=True, silent=True) or {}

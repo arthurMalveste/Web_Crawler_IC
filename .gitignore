@@ -2,6 +2,7 @@
 __pycache__/
 *.py[cod]
 .pytest_cache/
+.claude/
 
 # Configuracao especifica da maquina (caminho do corpus, e-mail de contato).
 # O modelo .env.example E versionado de proposito.
