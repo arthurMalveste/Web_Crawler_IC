@@ -20,13 +20,13 @@ from typing import Any
 
 from crawler.core.fetcher import Config
 from crawler.core.frontier import STATUS_DISCOVERED, STATUS_STORED, Frontier
-from crawler.core.record import TIER_NEGATIVE, TIER_STRONG, TIER_WEAK
+from crawler.core.record import TIER_STRONG, TIER_WEAK
 from crawler.engine.spec import SourceSpec
 from crawler.engine.urlfrontier import URLFrontier
 
 # Mesmo dicionario que crawler/cli.py usa para o `--tier` da CLI — o painel
 # expoe as mesmas tres faixas ao operador, entao usa o mesmo vocabulario.
-TIER_LABELS: dict[str, str] = {"strong": TIER_STRONG, "weak": TIER_WEAK, "negative": TIER_NEGATIVE}
+TIER_LABELS: dict[str, str] = {"strong": TIER_STRONG, "weak": TIER_WEAK}
 
 ROOT = Path(__file__).resolve().parent.parent
 CONFIG_DIR = ROOT / "config"

@@ -42,7 +42,7 @@ devolve um erro em vez de disparar dois subprocessos.
 - **Pendentes / Armazenados por fonte**, na tabela de Fontes — cruzamento
   fonte×status lido direto do `frontier.sqlite` (`metrics.counts_by_source_and_status`).
 - **Prévia do harvest** ("N arquivos serão baixados agora"), por fonte,
-  recalculada a cada mudança nas caixas de faixa (`strong`/`weak`/`negative`)
+  recalculada a cada mudança nas caixas de faixa (`strong`/`weak`)
   — usa a MESMA consulta que `Pipeline.harvest()` de fato consome
   (`Frontier.pending`, via `metrics.pending_by_source`), então não é uma
   estimativa. Se nenhuma faixa estiver marcada, um aviso explícito lembra

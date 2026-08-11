@@ -30,7 +30,7 @@ from .core.fetcher import Config, Fetcher
 from .core.frontier import Frontier
 from .core.pipeline import Pipeline
 from .core.prefilter import Lexicon
-from .core.record import TIER_HARD_NEGATIVE, TIER_NEGATIVE, TIER_STRONG, TIER_WEAK
+from .core.record import TIER_STRONG, TIER_WEAK
 from .core.store import Store
 from .engine.spec import STRATEGY_BFS, STRATEGY_FOCUSED, SourceSpec
 
@@ -69,7 +69,7 @@ def build(args: argparse.Namespace):
     store = Store(data_root)
     frontier = Frontier(data_root / "frontier.sqlite")
     fetcher = Fetcher(config)
-    pipeline = Pipeline(frontier, store, fetcher, lexicon, collect_negatives=not args.no_negatives)
+    pipeline = Pipeline(frontier, store, fetcher, lexicon)
     return config, lexicon, store, frontier, fetcher, pipeline
 
 
@@ -166,7 +166,6 @@ def _args_para_fonte(nome: str, base: argparse.Namespace) -> argparse.Namespace:
         no_sitemap=False,
         workers=getattr(base, "workers", None),
         data_root=base.data_root,
-        no_negatives=base.no_negatives,
         verbose=base.verbose,
     )
 
@@ -210,7 +209,7 @@ def cmd_harvest(args: argparse.Namespace) -> int:
     _, _, _, frontier, fetcher, pipeline = build(args)
     tiers = None
     if args.tier:
-        tiers = [{"strong": TIER_STRONG, "weak": TIER_WEAK, "negative": TIER_NEGATIVE}[t] for t in args.tier]
+        tiers = [{"strong": TIER_STRONG, "weak": TIER_WEAK}[t] for t in args.tier]
     with fetcher, frontier:
         stats = pipeline.harvest(limit=args.limit, tiers=tiers, max_workers=args.workers)
     print(json.dumps(stats.as_dict(), indent=2, ensure_ascii=False))
@@ -275,11 +274,7 @@ def cmd_browse(args: argparse.Namespace) -> int:
     data_root = Path(args.data_root) if args.data_root else config.data_root
     tiers = None
     if args.tier:
-        tiers = [
-            {"strong": TIER_STRONG, "weak": TIER_WEAK, "negative": TIER_NEGATIVE,
-             "hard": TIER_HARD_NEGATIVE}[t]
-            for t in args.tier
-        ]
+        tiers = [{"strong": TIER_STRONG, "weak": TIER_WEAK}[t] for t in args.tier]
     saida = Path(args.out) if args.out else ROOT / "reports" / "corpus.html"
     n = gerar(data_root / "frontier.sqlite", saida, tiers, args.limit)
     print(f"{n} documentos -> {saida}")
@@ -335,7 +330,6 @@ def cmd_sync_ntrs(args: argparse.Namespace) -> int:
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="crawler", description="Etapa 1 — coleta de ConOps")
     p.add_argument("--data-root", help="sobrepoe data_root do domains.yaml")
-    p.add_argument("--no-negatives", action="store_true", help="nao amostrar a classe negativa")
     p.add_argument("-v", "--verbose", action="store_true")
     sub = p.add_subparsers(dest="cmd", required=True)
 
@@ -397,7 +391,7 @@ def main(argv: list[str] | None = None) -> int:
 
     h = sub.add_parser("harvest", help="baixar o que a fila aprovou (paralelo por dominio)")
     h.add_argument("--limit", type=int)
-    h.add_argument("--tier", nargs="*", choices=["strong", "weak", "negative"])
+    h.add_argument("--tier", nargs="*", choices=["strong", "weak"])
     h.add_argument(
         "--workers",
         type=int,
@@ -410,7 +404,7 @@ def main(argv: list[str] | None = None) -> int:
     t.set_defaults(func=cmd_retry)
 
     b = sub.add_parser("browse", help="indice HTML navegavel do corpus")
-    b.add_argument("--tier", nargs="*", choices=["strong", "weak", "negative", "hard"])
+    b.add_argument("--tier", nargs="*", choices=["strong", "weak"])
     b.add_argument("--limit", type=int)
     b.add_argument("--out", help="caminho do HTML (padrao: reports/corpus.html)")
     b.add_argument("--abrir", action="store_true", help="abrir no navegador ao terminar")

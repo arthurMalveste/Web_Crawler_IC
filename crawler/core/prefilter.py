@@ -11,7 +11,6 @@ O mesmo `Lexicon` e reusado na Etapa 3 sobre o texto completo — por isso
 
 from __future__ import annotations
 
-import random
 import re
 import unicodedata
 from dataclasses import dataclass
@@ -89,10 +88,6 @@ class Lexicon:
         self.strong_min = t.get("strong_min_score", 10.0)
         self.weak_min = t.get("weak_min_score", 2.5)
 
-        ns = cfg.get("negative_sampling", {})
-        self.neg_cap = ns.get("per_source_cap", 400)
-        self.neg_seed = ns.get("seed", 0)
-
     @classmethod
     def load(cls, path: str | Path) -> "Lexicon":
         with open(path, encoding="utf-8") as fh:
@@ -161,38 +156,3 @@ class Lexicon:
         rec.matched_terms = br.matched_terms
         return br
 
-    def is_safety_jargon(self, rec: DocumentRecord) -> bool:
-        """Marca *hard negatives*: densos em jargao de safety, mas nao ConOps."""
-        blob = normalize(rec.text_for_scoring)
-        return bool(self._find(blob, self.safety))
-
-
-class NegativeSampler:
-    """Amostragem determinística da classe negativa.
-
-    Sem classe negativa nao ha precisao, recall nem F1 — a Etapa 5 vira
-    demonstracao em vez de avaliacao. A decisao e por registro e reprodutivel
-    (hash do id + semente fixa), de modo que reexecutar a coleta seleciona
-    exatamente os mesmos negativos.
-    """
-
-    def __init__(self, cap: int, seed: int):
-        self.cap = cap
-        self.seed = seed
-        self._taken: dict[str, int] = {}
-
-    def accept(self, rec: DocumentRecord) -> bool:
-        taken = self._taken.get(rec.source, 0)
-        if taken >= self.cap:
-            return False
-        rng = random.Random(f"{self.seed}:{rec.key}")
-        # Aceita ~1 em 8. Com o cap por fonte, isso espalha a amostra pelo
-        # acervo inteiro em vez de concentrar nos primeiros registros vistos.
-        if rng.random() < 0.125:
-            self._taken[rec.source] = taken + 1
-            return True
-        return False
-
-    @property
-    def counts(self) -> dict[str, int]:
-        return dict(self._taken)

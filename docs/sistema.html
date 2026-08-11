@@ -150,7 +150,7 @@ Este sistema automatiza a <strong>primeira etapa</strong> desse trabalho: encont
 <tr><td>2</td><td>Extração de texto e pré-processamento</td><td>Futura — 87% dos documentos do NTRS já chegam com texto extraído, o que reduz muito o trabalho desta etapa</td></tr>
 <tr><td>3</td><td>Filtragem por palavras-chave sobre o texto completo</td><td>Futura — o <code>lexicon.yaml</code> construído aqui é reaproveitado integralmente</td></tr>
 <tr><td>4</td><td>Representação semântica (<em>embeddings</em> BERT)</td><td>Futura — o pontuador de links foi desenhado para depois usar esses vetores</td></tr>
-<tr><td>5</td><td>Classificação automática por LLM</td><td>Futura — a classe negativa coletada aqui é o que torna a avaliação possível</td></tr>
+<tr><td>5</td><td>Classificação automática por LLM</td><td>Futura — precisará curar sua própria classe negativa quando existir (ver nota em "Amostragem de negativos" abaixo)</td></tr>
 </table>
 
 <div class="box">
@@ -262,10 +262,7 @@ Para a STPA, o ConOps é a fonte primária: é dele que se extraem as perdas a e
 <dd>Quando uma requisição falha, esperar antes de tentar de novo — e dobrar a espera a cada nova falha (2s, 4s, 8s...). Evita martelar um servidor que já está com problema.</dd>
 
 <dt>Tier (faixa)</dt>
-<dd>A classificação que o pré-filtro atribui a cada candidato: <code>strong</code>, <code>weak</code>, <code>hard_negative</code> ou <code>negative_sample</code>. Determina se o arquivo será baixado e como será usado na validação.</dd>
-
-<dt>Hard negative (negativo difícil)</dt>
-<dd>Documento que <strong>parece</strong> pertencer à classe alvo mas não pertence. No caso: apresentações do workshop MIT STAMP, densas em terminologia de segurança de sistemas, mas que não são documentos de concepção. São os exemplos mais informativos para validar um classificador — se ele acerta estes, aprendeu o padrão de verdade em vez de detectar jargão.</dd>
+<dd>A classificação que o pré-filtro atribui a cada candidato: <code>strong</code>, <code>weak</code> ou <code>negative_sample</code>. Só as duas primeiras entram na fila e são baixadas — <code>negative_sample</code> é descartado na hora (ver "Amostragem de negativos" abaixo).</dd>
 
 <dt>Playwright</dt>
 <dd>Biblioteca que controla um navegador real sem interface gráfica (<em>headless</em>). Necessária para páginas que montam o conteúdo por JavaScript — o HTML entregue pelo servidor vem vazio, e só depois de executar os scripts os links aparecem.</dd>
@@ -400,7 +397,7 @@ sitemap: auto                       # tentar sitemap antes de navegar</code></pr
 <ol>
   <li><strong>Controle de exportação:</strong> se o metadado marca ITAR ou EAR, o registro é descartado antes de tudo e a razão é registrada.</li>
   <li><strong>Pontuação léxica:</strong> título, resumo e assuntos são comparados ao léxico, resultando numa faixa.</li>
-  <li><strong>Amostragem de negativos:</strong> documentos sem sinal são amostrados (cerca de 1 em 8, com teto por fonte) — exceto em fontes marcadas como <code>hard_negatives</code>, onde tudo é coletado.</li>
+  <li><strong>Descarte de negativos:</strong> se a faixa é <code>negative_sample</code> (sem sinal), o candidato nem entra na fila — ver "Amostragem de negativos" mais abaixo para o histórico dessa decisão.</li>
   <li><strong>Inserção na fila de documentos</strong> (banco SQLite separado), se ainda não conhecido.</li>
 </ol>
 
@@ -425,7 +422,7 @@ sitemap: auto                       # tentar sitemap antes de navegar</code></pr
 <table>
 <tr><th style="width:22%">Módulo</th><th class="num" style="width:8%">Linhas</th><th>Responsabilidade</th></tr>
 <tr><td><code>record.py</code></td><td class="num">118</td><td>Define <code>DocumentRecord</code>, o contrato entre a Etapa 1 e todo o resto. Também canonicaliza URLs e calcula <em>hashes</em>.</td></tr>
-<tr><td><code>prefilter.py</code></td><td class="num">198</td><td>Carrega o léxico, normaliza texto (minúsculas, sem acentos, pontuação virando espaço) e pontua documentos em faixas. Contém também o amostrador determinístico de negativos.</td></tr>
+<tr><td><code>prefilter.py</code></td><td class="num">~170</td><td>Carrega o léxico, normaliza texto (minúsculas, sem acentos, pontuação virando espaço) e pontua documentos em faixas.</td></tr>
 <tr><td><code>fetcher.py</code></td><td class="num">402</td><td>O único downloader do sistema. <code>robots.txt</code>, limite de taxa, <em>backoff</em>, requisições condicionais, validação por <em>magic bytes</em>, tetos de tamanho e de tempo, <em>blocklist</em>.</td></tr>
 <tr><td><code>frontier.py</code></td><td class="num">283</td><td>Fila de <strong>documentos</strong> em SQLite: estado, deduplicação, retomada, e o registro de conteúdos com suas procedências.</td></tr>
 <tr><td><code>store.py</code></td><td class="num">93</td><td>Armazenamento endereçado por conteúdo e escrita do manifesto e dos rejeitados.</td></tr>
@@ -521,28 +518,34 @@ sitemap: auto                       # tentar sitemap antes de navegar</code></pr
 <tr><td><strong>Termos moderados</strong></td><td>Sugerem concepção sem nomear o artefato: <em>operational scenario</em>, <em>modes of operation</em>, <em>stakeholder needs</em>. Nunca elevam sozinhos.</td></tr>
 <tr><td><strong>Assinatura estrutural</strong></td><td>Títulos de seção canônicos das normas <strong>ISO/IEC/IEEE 29148:2011</strong> e <strong>ANSI/AIAA G-043A-2012</strong>: <em>current system or situation</em>, <em>justification for and nature of changes</em>, <em>summary of impacts</em>. Sinal muito mais específico que o termo isolado — raramente aparecem juntos fora de um documento de concepção real.</td></tr>
 <tr><td><strong>Marcadores adversariais</strong></td><td>Contêm sinal forte mas <strong>não</strong> são documentos de concepção: <em>review checklist</em>, <em>lessons learned</em>, <em>meeting minutes</em>, <em>progress report</em>. Rebaixam de <code>strong</code> para <code>weak</code> e marcam para revisão manual.</td></tr>
-<tr><td><strong>Vocabulário de safety</strong></td><td><em>STPA</em>, <em>STAMP</em>, <em>hazard analysis</em>, <em>unsafe control action</em>. Não indica ConOps — serve para identificar os negativos difíceis.</td></tr>
+<tr><td><strong>Vocabulário de safety</strong></td><td><em>STPA</em>, <em>STAMP</em>, <em>hazard analysis</em>, <em>unsafe control action</em>. Não indica ConOps. Reservado para o dicionário da Etapa 3 — não usado por nenhuma decisão desta etapa hoje.</td></tr>
 </table>
 
-<h3>As quatro faixas</h3>
+<h3>As três faixas</h3>
 <table>
-<tr><th style="width:19%">Faixa</th><th style="width:36%">Condição</th><th style="width:18%">Ação</th><th class="num">Corpus atual</th></tr>
+<tr><th style="width:19%">Faixa</th><th style="width:36%">Condição</th><th style="width:18%">Ação</th><th class="num">Corpus em 2026-08-11</th></tr>
 <tr><td><code>strong</code></td><td>Sinal forte no título, sem marcador adversarial</td><td>Baixar sempre</td><td class="num">92</td></tr>
 <tr><td><code>weak</code></td><td>Sinal apenas no resumo/assuntos, ou <code>strong</code> rebaixado por marcador adversarial</td><td>Baixar e marcar para revisão</td><td class="num">224</td></tr>
-<tr><td><code>hard_negative</code></td><td>Fonte declarada como fornecedora de negativos difíceis (MIT PSAS)</td><td>Coletar <strong>tudo</strong>, sem amostrar</td><td class="num">627</td></tr>
-<tr><td><code>negative_sample</code></td><td>Sem sinal, em fonte comum</td><td>Amostrar ~1 em 8, com teto por fonte</td><td class="num">856</td></tr>
+<tr><td><code>negative_sample</code></td><td>Sem sinal</td><td>Descartar — não entra na fila</td><td class="num">0</td></tr>
 </table>
 
 <div class="box">
-<span class="titulo">Por que coletar a classe negativa não é opcional</span>
-<p>O objetivo final é um <strong>classificador binário</strong>. Sem exemplos negativos não há como calcular <strong>precisão</strong> (quantos dos classificados como ConOps realmente são), <strong>recall</strong> (quantos dos ConOps existentes foram encontrados) nem <strong>F1</strong> (a média harmônica dos dois). Sem essas métricas, a Etapa 5 vira demonstração em vez de avaliação.</p>
-<p>Há três tipos de negativo, em ordem crescente de valor:</p>
-<ul>
-  <li><strong>Fáceis</strong> — documentos aleatórios sem nenhum sinal.</li>
-  <li><strong>Difíceis</strong> — o acervo MIT PSAS: denso em terminologia de segurança de sistemas, mas não são documentos de concepção.</li>
-  <li><strong>Adversariais</strong> — contêm o termo "ConOps" no título mas são <em>checklists</em>, atas ou lições aprendidas. Os mais informativos de todos.</li>
-</ul>
-<p>A amostragem é <strong>determinística</strong>: usa uma semente fixa combinada ao identificador do documento, de modo que reexecutar a coleta seleciona exatamente os mesmos negativos. Isso é requisito de reprodutibilidade.</p>
+<span class="titulo" id="amostragem-de-negativos">Amostragem de negativos — removida em 2026-08-06</span>
+<p>Até essa data o pré-filtro amostrava e guardava a classe negativa (~1 em 8
+por fonte comum, semente fixa para reprodutibilidade; mais o acervo inteiro
+do MIT PSAS coletado <strong>sem</strong> amostrar, como <em>hard negative</em>)
+— a justificativa era que um classificador binário na Etapa 5 precisa de
+negativos para calcular precisão/recall/F1.</p>
+<p>Essa justificativa foi revista: a Etapa 1 não julga ConOps, e a Etapa 5
+(classificador) já está explicitamente fora de escopo do projeto agora.
+Guardar negativo "para quando a Etapa 5 existir" emprestava legitimidade de
+uma etapa futura para gastar recurso real hoje — medido ao vivo em
+2026-08-06: <strong>76% do volume em disco do corpus</strong> (526 MB de 694
+MB) era conteúdo negativo, nunca usado por nada nesta etapa. Removido do
+código (<code>NegativeSampler</code>, o papel <code>hard_negatives</code> do
+PSAS) e os 167 arquivos já baixados foram apagados do corpus. Se a Etapa 5
+acontecer, a amostragem — determinística, semente fixa + hash do id — segue
+disponível no histórico do git para ser reintroduzida então.</p>
 </div>
 
 <div class="quebra"></div>
@@ -599,8 +602,8 @@ sitemap: auto                       # tentar sitemap antes de navegar</code></pr
   <td>417 candidatos. Acervo em domínio público, coleta incremental nativa. Contém relatórios da FAA, NHTSA e FHWA.</td>
 </tr>
 <tr>
-  <td><strong>MIT PSAS</strong></td><td>Rastreamento</td><td><span class="pill ok">COLETADO</span></td>
-  <td>703 documentos, todos <em>hard negatives</em>. Não contém ConOps — contém apresentações <em>sobre</em> STPA. Papel duplo: vocabulário para a Etapa 3 e negativos difíceis para validar a Etapa 5.</td>
+  <td><strong>MIT PSAS</strong></td><td>Rastreamento</td><td><span class="pill ok">RASTREIA</span></td>
+  <td>Não contém ConOps — contém apresentações <em>sobre</em> STPA. Continua na rotação de <code>discover-all</code> como fonte comum; nunca rendeu <code>strong</code>/<code>weak</code> nesta base. Até 2026-08-06 tinha papel especial de <em>hard negative</em> (ver "Amostragem de negativos" acima) — removido.</td>
 </tr>
 <tr>
   <td><strong>FAA</strong></td><td>Sitemap + rastreamento</td><td><span class="pill ok">COLETANDO</span></td>
@@ -696,7 +699,6 @@ sitemap: auto                       # tentar sitemap antes de navegar</code></pr
   <li><strong>124 testes automatizados</strong> que não tocam a rede — usam respostas reais gravadas. Reproduzir a coleta não depende de os servidores estarem no ar.</li>
   <li><strong>Quatro bugs de campo travados por teste de regressão</strong> (ver detalhes abaixo).</li>
   <li><strong>Configuração versionada em YAML</strong>, métricas datadas em <code>reports/</code>, manifesto JSONL com procedência completa.</li>
-  <li><strong>Amostragem determinística</strong> da classe negativa.</li>
 </ul>
 
 <h3>Eficiência medida</h3>

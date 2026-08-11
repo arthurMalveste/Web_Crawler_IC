@@ -45,7 +45,7 @@ def rec(fonte: str, sid: str) -> DocumentRecord:
 
 def _args(**over) -> argparse.Namespace:
     base = dict(
-        data_root=None, no_negatives=False, verbose=False,
+        data_root=None, verbose=False,
         limit=None, only=None, skip=None, retry_failed=False, workers=None,
     )
     base.update(over)

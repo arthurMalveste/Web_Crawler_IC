@@ -150,7 +150,6 @@ document_extensions: ['.pdf']
 document_patterns: ['/download/\d+']   # quando a URL não tem extensão
 sitemap: auto
 render: false
-role: positives                        # ou hard_negatives
 ```
 
 Depois:

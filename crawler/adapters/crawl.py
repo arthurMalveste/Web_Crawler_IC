@@ -16,7 +16,7 @@ from ..core.prefilter import Lexicon
 from ..core.record import DocumentRecord
 from ..engine.crawler import Crawler, CrawlStats
 from ..engine.renderer import make_renderer
-from ..engine.spec import ROLE_HARD_NEGATIVES, SourceSpec
+from ..engine.spec import SourceSpec
 from ..engine.urlfrontier import URLFrontier
 from .base import BaseAdapter
 
@@ -39,7 +39,6 @@ class CrawlAdapter(BaseAdapter):
         super().__init__(fetcher, **options)
         self.spec = spec
         self.name = spec.name
-        self.collect_all_negatives = spec.role == ROLE_HARD_NEGATIVES
         self.lexicon = lexicon
         self.frontier_db = Path(frontier_db)
         self.reset = reset

@@ -31,12 +31,9 @@ from .frontier import (
     STATUS_UNCHANGED,
     Frontier,
 )
-from .prefilter import Lexicon, NegativeSampler
+from .prefilter import Lexicon
 from .record import (
-    TIER_HARD_NEGATIVE,
     TIER_NEGATIVE,
-    TIER_STRONG,
-    TIER_WEAK,
     DocumentRecord,
     utcnow_iso,
 )
@@ -94,15 +91,11 @@ class Pipeline:
         store: Store,
         fetcher: Fetcher,
         lexicon: Lexicon,
-        *,
-        collect_negatives: bool = True,
     ):
         self.frontier = frontier
         self.store = store
         self.fetcher = fetcher
         self.lexicon = lexicon
-        self.sampler = NegativeSampler(lexicon.neg_cap, lexicon.neg_seed)
-        self.collect_negatives = collect_negatives
 
     # ------------------------------------------------------------- descoberta
 
@@ -110,10 +103,6 @@ class Pipeline:
         run_id = f"{adapter.name}-discover-{uuid.uuid4().hex[:8]}"
         self.frontier.start_run(run_id, adapter.name, {"limit": limit, "fase": "discover"})
         st = DiscoveryStats()
-        # Fontes de negativos dificeis (PSAS) sao coletadas por inteiro: elas
-        # existem exatamente para isso, e amostrar 1 em 8 descartaria o material
-        # mais informativo que o projeto tem para validar a Etapa 5.
-        tudo_negativo = getattr(adapter, "collect_all_negatives", False)
 
         for rec in adapter.discover():
             st.vistos += 1
@@ -131,13 +120,15 @@ class Pipeline:
             self.lexicon.score_record(rec)
 
             if rec.tier == TIER_NEGATIVE:
-                if tudo_negativo:
-                    rec.tier = TIER_HARD_NEGATIVE
-                elif not (self.collect_negatives and self.sampler.accept(rec)):
-                    # Amostrar a classe negativa e obrigatorio: sem ela nao ha
-                    # precisao/recall/F1 para avaliar a Etapa 5.
-                    st.por_faixa["descartado"] = st.por_faixa.get("descartado", 0) + 1
-                    continue
+                # Etapa 1 nao julga ConOps: se o lexico ja sinalizou ausencia
+                # de indicio, o candidato nem entra na fila. Guardar negativo
+                # "para treinar um classificador futuro" era emprestar
+                # legitimidade de uma etapa (5) que o proprio projeto colocou
+                # fora de escopo agora (ver docs/handoff) — e o custo era
+                # real: 76% do volume em disco em 2026-08-06 era negativo
+                # nunca usado por nada nesta etapa. Decisao de 2026-08-06.
+                st.por_faixa["descartado"] = st.por_faixa.get("descartado", 0) + 1
+                continue
 
             st.por_faixa[rec.tier] = st.por_faixa.get(rec.tier, 0) + 1
             if self.frontier.add(rec, status=STATUS_DISCOVERED):
