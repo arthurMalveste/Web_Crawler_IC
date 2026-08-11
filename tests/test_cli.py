@@ -13,6 +13,7 @@ tocar o corpus real.
 from __future__ import annotations
 
 import argparse
+import time
 
 from crawler import cli
 from crawler.core.record import DocumentRecord
@@ -22,13 +23,22 @@ class FakeAdapter:
     """Mesma forma de `BaseAdapter` (duck typing — os outros arquivos de teste
     tambem nao subclasseiam), com um jeito de forcar falha."""
 
-    def __init__(self, name: str, recs: list[DocumentRecord] | None = None, erro: Exception | None = None):
+    def __init__(
+        self,
+        name: str,
+        recs: list[DocumentRecord] | None = None,
+        erro: Exception | None = None,
+        delay_s: float = 0.0,
+    ):
         self.name = name
         self._recs = recs or []
         self._erro = erro
+        self._delay_s = delay_s
         self.stats = None
 
     def discover(self):
+        if self._delay_s:
+            time.sleep(self._delay_s)
         if self._erro:
             raise self._erro
         yield from self._recs
@@ -129,3 +139,27 @@ class TestDiscoverAll:
             assert f.counts_by("source") == {"ntrs": 1}
         finally:
             f.close()
+
+    def test_fontes_rodam_em_paralelo_nao_em_serie(self, tmp_path, monkeypatch):
+        """Decisao de 2026-08-11: fontes diferentes batem em hosts diferentes,
+        entao esperar uma terminar pra' comecar a proxima nao tem justificativa
+        — e' exatamente o desperdicio medido ao vivo com CORDIS/ESA Cosmos
+        (819s + 1200s em serie). Trava essa propriedade: 4 fontes de 0.3s cada
+        rodando em serie levariam >=1.2s; em paralelo, bem menos que isso."""
+        atraso = 0.3
+        fontes_falsas = {
+            nome: FakeAdapter(nome, delay_s=atraso)
+            for nome in ("ntrs", "rosap", "faa", "dtic")
+        }
+        monkeypatch.setattr(cli, "make_adapter", lambda nome, *a, **kw: fontes_falsas[nome])
+
+        args = _args(data_root=str(tmp_path), only=list(fontes_falsas))
+        inicio = time.monotonic()
+        cli.cmd_discover_all(args)
+        decorrido = time.monotonic() - inicio
+
+        limite_serial = atraso * len(fontes_falsas)
+        assert decorrido < limite_serial, (
+            f"levou {decorrido:.2f}s para {len(fontes_falsas)} fontes de {atraso}s — "
+            f"parece serial (limite serial seria >= {limite_serial:.2f}s)"
+        )

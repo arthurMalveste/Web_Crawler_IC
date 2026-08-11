@@ -6,7 +6,9 @@ servidores reais — armadilhas de calendario, profundidade infinita, orcamento
 esgotado — e mantem os testes reproduziveis.
 """
 
+import time
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import httpx
 import pytest
@@ -293,6 +295,39 @@ class TestURLFrontier:
         assert f.counts() == {"pending": 1, "failed": 1}
         f.close()
 
+    def test_claim_next_e_atomico_e_nao_repete(self, tmp_path):
+        """Base da fila continua (ver crawler.py): reivindicar tem que
+        remover da fronteira de pendentes na hora, nao so' quando alguem
+        chamar `mark()` depois — senao dois workers pegariam a mesma URL."""
+        f = URLFrontier(tmp_path / "u.sqlite", "s")
+        f.add("https://x.org/a", depth=0, priority=2.0)
+        f.add("https://x.org/b", depth=0, priority=1.0)
+
+        primeiro = f.claim_next()
+        assert primeiro.url == "https://x.org/a", "prioridade mais alta primeiro"
+        assert f.counts() == {"claimed": 1, "pending": 1}
+
+        segundo = f.claim_next()
+        assert segundo.url == "https://x.org/b"
+        assert f.claim_next() is None, "nada mais pendente"
+        f.close()
+
+    def test_reabrir_reivindicadas_recupera_execucao_interrompida(self, tmp_path):
+        """Uma URL reivindicada e' orfa se o processo cai antes do `mark()`
+        que a resolveria (kill, crash) — sem isso, ela some da fronteira para
+        sempre: nem pending nem visited."""
+        f = URLFrontier(tmp_path / "u.sqlite", "s")
+        f.add("https://x.org/a", depth=0)
+        f.add("https://x.org/b", depth=0)
+        f.claim_next()  # simula o processo anterior reivindicando "a" e caindo
+        f.mark("https://x.org/b", "visited")
+
+        n = f.reabrir_reivindicadas()
+        assert n == 1
+        assert f.counts() == {"pending": 1, "visited": 1}
+        assert f.claim_next().url == "https://x.org/a"
+        f.close()
+
 
 # ------------------------------------------------------------------ titulos
 
@@ -467,6 +502,91 @@ class TestMotor:
         ).fetchone()["n"]
         assert visitadas == len({u.rstrip("/") for u in SITE})
         f2.close()
+
+    @respx.mock
+    def test_reabre_reivindicacao_orfa_de_execucao_anterior(self, tmp_path, fetcher, lexicon):
+        """Se o processo cair entre reivindicar e resolver uma URL, a proxima
+        execucao tem que recupera-la — nao deixar orfa para sempre."""
+        montar_site()
+        db = tmp_path / "u.sqlite"
+        f1 = URLFrontier(db, "ex")
+        f1.add("https://ex.org/", depth=0, priority=1000.0)
+        f1.claim_next()  # simula um processo anterior reivindicando a semente e caindo
+        f1.close()
+
+        f2 = URLFrontier(db, "ex")
+        recs = list(Crawler(spec_de_teste(STRATEGY_FOCUSED, max_pages=10), fetcher, lexicon, f2).crawl())
+        assert recs, "a semente reivindicada-e-orfa devia ter sido revisitada, nao ignorada"
+        f2.close()
+
+
+class TestEmissaoIncremental:
+    """Decisao de 2026-08-11: documentos sao entregues assim que descobertos,
+    nao so' no fim do rastreamento inteiro. Ver docstring de crawler.py."""
+
+    @staticmethod
+    def _site_infinito_com_documento_por_pagina():
+        def responder(request: httpx.Request) -> httpx.Response:
+            path = urlsplit(str(request.url)).path
+            if path.endswith(".pdf"):
+                return httpx.Response(200, content=b"%PDF-")
+            n = int(path.rstrip("/").rsplit("/", 1)[-1] or "0")
+            html = (
+                f'<a href="/{n + 1}">proxima</a>'
+                f'<a href="/doc{n}-concept-of-operations.pdf">ConOps {n}</a>'
+            )
+            return httpx.Response(200, html=html)
+
+        respx.get(url__startswith="https://ex.org/").mock(side_effect=responder)
+
+    @respx.mock
+    def test_max_documents_para_o_rastreamento_de_verdade(self, tmp_path, fetcher, lexicon):
+        """`Scope.max_documents` tem que parar o RASTREAMENTO, nao so' truncar
+        a saida depois — o campo existia na dataclass sem nunca ser lido em
+        lugar nenhum antes desta correcao (achado ao investigar o bug real:
+        --limit 10 rodando as 400 paginas do orcamento do FAA do mesmo jeito)."""
+        self._site_infinito_com_documento_por_pagina()
+        f = URLFrontier(tmp_path / "u.sqlite", "ex")
+        spec = spec_de_teste(STRATEGY_BFS, max_pages=1000)
+        spec.scope.max_documents = 3
+        recs = list(Crawler(spec, fetcher, lexicon, f).crawl())
+
+        assert len(recs) >= 3
+        assert 0 < f_count_paginas(f) < 50, (
+            "max_documents=3 deveria parar o rastreamento bem antes de "
+            f"max_pages=1000 — visitou {f_count_paginas(f)} paginas"
+        )
+        f.close()
+
+    @respx.mock
+    def test_fechar_o_generator_cedo_para_o_rastreamento(self, tmp_path, fetcher, lexicon):
+        """E' exatamente o que `Pipeline.discover(limit=N)` faz: consome os N
+        primeiros registros e para de iterar (`break`), fechando o generator.
+        Antes desta correcao isso nao impedia NADA — o rastreamento inteiro
+        (ate max_pages) ja tinha rodado por baixo antes do primeiro registro
+        sequer ser entregue."""
+        self._site_infinito_com_documento_por_pagina()
+        f = URLFrontier(tmp_path / "u.sqlite", "ex")
+        spec = spec_de_teste(STRATEGY_BFS, max_pages=1000)
+        c = Crawler(spec, fetcher, lexicon, f)
+
+        gen = c.crawl()
+        primeiro = next(gen)
+        assert primeiro is not None
+        gen.close()  # equivalente ao `break` de Pipeline.discover
+
+        time.sleep(0.3)  # da tempo de qualquer worker ainda em voo desistir
+        assert c.stats.paginas_baixadas < 50, (
+            "fechar o generator cedo deveria parar o rastreamento, nao so' a "
+            f"entrega — visitou {c.stats.paginas_baixadas} paginas depois do close()"
+        )
+        f.close()
+
+
+def f_count_paginas(f: URLFrontier) -> int:
+    return f.conn.execute(
+        "SELECT COUNT(*) n FROM urls WHERE source = ? AND kind = 'page' AND state = 'visited'", (f.source,)
+    ).fetchone()["n"]
 
 
 class TestComparacaoDeEstrategias:

@@ -17,6 +17,7 @@ import argparse
 import json
 import logging
 import sys
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -171,12 +172,27 @@ def _args_para_fonte(nome: str, base: argparse.Namespace) -> argparse.Namespace:
 
 
 def cmd_discover_all(args: argparse.Namespace) -> int:
-    """Roda `discover` em TODAS as fontes configuradas, uma de cada vez.
+    """Roda `discover` em TODAS as fontes configuradas, em PARALELO.
 
     Existe porque cobrir as 9 fontes hoje (7 YAML + ntrs + rosap) exigia 9
     invocacoes manuais — facil de esquecer uma. Uma fonte que falha (servidor
     fora do ar, por exemplo) nao pode travar a cobertura das outras: captura,
-    loga, segue para a proxima.
+    loga, segue para a proxima — isso vale tanto rodando em serie quanto em
+    paralelo, e continua valendo aqui.
+
+    Ate 2026-08-11 isso era um `for` sequencial: uma fonte inteira (`build()`
+    + `discover()`, minutos para CORDIS/ESA Cosmos) tinha que terminar antes
+    da proxima nem comecar — sem motivo real, ja que fontes diferentes batem
+    em HOSTS diferentes, e e' o `Fetcher` (semaforo por host) quem decide o
+    ritmo de cada uma, nao esta funcao. E exatamente o desenho que ja
+    sustenta `harvest()` paralelo entre fontes (ver `Pipeline.harvest`) —
+    aqui aplica-se o mesmo: construir `Frontier`/`Store`/`Fetcher` UMA vez,
+    compartilhados (todos ja sao thread-safe: `Frontier`/`URLFrontier` usam
+    WAL + lock, `Store.append_reject` tem lock proprio, `Fetcher` e' o
+    proprio ponto que aplica o teto por host), e disparar o `discover()` de
+    cada fonte num pool. Testado ao vivo: Playwright (unica fonte com
+    `render=True`, ESA EOF) funciona normalmente rodando fora da thread
+    principal neste ambiente.
     """
     fontes = ["ntrs", "rosap"] + (sorted(p.stem for p in SOURCES_DIR.glob("*.yaml")) if SOURCES_DIR.exists() else [])
     if args.only:
@@ -184,22 +200,28 @@ def cmd_discover_all(args: argparse.Namespace) -> int:
     if args.skip:
         fontes = [f for f in fontes if f not in args.skip]
 
-    resultados: dict[str, Any] = {}
-    for nome in fontes:
-        print(f"=== {nome} ===")
+    def _rodar(nome: str) -> tuple[str, dict[str, Any]]:
         try:
             sub_args = _args_para_fonte(nome, args)
-            _, lexicon, store, frontier, fetcher, pipeline = build(sub_args)
-            with fetcher, frontier:
-                adapter = make_adapter(nome, fetcher, lexicon, sub_args)
-                stats = pipeline.discover(adapter, limit=sub_args.limit)
-                saida: dict[str, Any] = {"descoberta": stats.as_dict()}
-                if isinstance(adapter, CrawlAdapter) and adapter.stats:
-                    saida["rastreamento"] = adapter.stats.as_dict()
-                resultados[nome] = saida
+            adapter = make_adapter(nome, fetcher, lexicon, sub_args)
+            stats = pipeline.discover(adapter, limit=sub_args.limit)
+            saida: dict[str, Any] = {"descoberta": stats.as_dict()}
+            if isinstance(adapter, CrawlAdapter) and adapter.stats:
+                saida["rastreamento"] = adapter.stats.as_dict()
+            return nome, saida
         except Exception as exc:
             log.error("discover_all.falhou", fonte=nome, error=str(exc))
-            resultados[nome] = {"erro": str(exc)}
+            return nome, {"erro": str(exc)}
+
+    resultados: dict[str, Any] = {}
+    _, lexicon, store, frontier, fetcher, pipeline = build(args)
+    with fetcher, frontier:
+        with ThreadPoolExecutor(max_workers=len(fontes) or 1, thread_name_prefix="discover-all") as pool:
+            futuros = {pool.submit(_rodar, nome): nome for nome in fontes}
+            for fut in as_completed(futuros):
+                nome, saida = fut.result()
+                print(f"=== {nome} ===")
+                resultados[nome] = saida
 
     print(json.dumps(resultados, indent=2, ensure_ascii=False))
     return 0

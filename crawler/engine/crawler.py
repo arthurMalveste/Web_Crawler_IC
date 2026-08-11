@@ -8,20 +8,31 @@ Fluxo por fonte:
     visitar pagina -> extrair links (ancora + contexto)
               |             |
               |             +-> pontuar cada link -> enfileirar
+              |             +-> documento com metadado disponivel? emite JA
               v
     extrair metadados do <head>  ->  DocumentRecord
 
 Os dois modos de expansao compartilham todo o codigo; a unica diferenca e a
 prioridade atribuida pelo LinkScorer. Isso e proposital: comparar rastreamento
 focado com BFS so tem valor se as duas execucoes forem identicas em tudo o mais.
+
+EMISSAO INCREMENTAL (decisao de 2026-08-11): documentos sao convertidos em
+`DocumentRecord` e entregues ao chamador ASSIM QUE descobertos, nao so no fim
+do rastreamento inteiro. Antes disso, `--limit`/`Scope.max_documents` nao
+paravam NADA de verdade para fontes de crawl HTML — o gerador so' entregava
+alguma coisa depois que TODO o orcamento de paginas fosse consumido, entao
+qualquer teto de "quantos documentos eu preciso" so' cortava o que entrava na
+fila DEPOIS do rastreamento inteiro ja ter rodado. Medido ao vivo: um
+`discover-all --limit 10` na FAA rodou 400 paginas (o `max_pages` da fonte)
+sem entregar nada por mais de 10 minutos. Ver `Crawler._emitir_agora`.
 """
 
 from __future__ import annotations
 
+import queue
 import re
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from typing import Any, Iterator
 from urllib.parse import urlsplit
@@ -39,9 +50,11 @@ from .traps import HostBudget, canonicalize, is_trap
 from .urlfrontier import (
     KIND_DOCUMENT,
     KIND_PAGE,
+    STATE_EMITTED,
     STATE_FAILED,
     STATE_SKIPPED,
     STATE_VISITED,
+    CrawlURL,
     URLFrontier,
 )
 
@@ -94,18 +107,28 @@ class CrawlStats:
 
 
 class Crawler:
-    """Motor de rastreamento — visita paginas em paralelo por RODADAS.
+    """Motor de rastreamento — visita paginas em FILA CONTINUA, nao rodadas.
 
     A fronteira de paginas cresce durante o proprio rastreamento (ao contrario
     do harvest, que parte de uma lista fechada), entao nao da pra materializar
-    tudo de uma vez no inicio. A solucao e' processar em lotes do tamanho do
-    pool: `next_batch(n)` devolve `n` linhas DISTINTAS (LIMIT do SQL), a rodada
-    inteira e' disparada em paralelo, e so quando TODAS terminam e' que a
-    proxima rodada busca mais — isso e' o que evita duas threads pegando a
-    mesma URL, sem precisar inventar semantica de "reserva" de linha no
-    SQLite. `Fetcher` ja aplica o teto de `rate`/`concurrency` por HOST (ver
-    `core/fetcher.py`), entao visitar paginas em paralelo herda o mesmo
-    respeito a cada dominio que os documentos do harvest ja tem.
+    tudo de uma vez no inicio. Ate 2026-08-11 isso virava lotes sincronizados
+    (`next_batch(n)`, todo o lote esperava o membro mais lento terminar antes
+    do proximo comecar) — um worker preso numa URL lenta (retry de rede,
+    servidor devagar) deixava os outros OCIOSOS ate a rodada inteira fechar,
+    mesmo com fronteira cheia de trabalho pronto. Substituido por fila
+    continua: cada worker reivindica-processa-reivindica de novo em loop
+    proprio, sem esperar os colegas. `URLFrontier.claim_next()` faz o
+    SELECT+UPDATE atomico que evita duas threads pegando a mesma URL — o
+    mesmo problema que o desenho por rodadas evitava, resolvido na fronteira
+    em vez de no agendador. `Fetcher` ja aplica o teto de `rate`/`concurrency`
+    por HOST (ver `core/fetcher.py`), entao visitar paginas em paralelo herda
+    o mesmo respeito a cada dominio que os documentos do harvest ja tem.
+
+    Termino e' por CONTAGEM DE TRABALHO EM VOO (`_em_voo`), nao por "fila
+    vazia": um worker so' desiste de verdade quando reivindicar nao rende nada
+    E ninguem mais esta processando uma pagina que poderia descobrir mais
+    (`_em_voo == 0`) — senao workers ociosos por um instante encerrariam cedo
+    demais, perdendo paginas que um colega ainda ia descobrir.
     """
 
     def __init__(
@@ -127,23 +150,22 @@ class Crawler:
         self.stats = CrawlStats()
         self._budget = HostBudget(spec.scope.max_pages)
         self._max_workers_override = max_workers
-        # Protege os CONTADORES de `self.stats` (`+=` nao e' atomico) — nao os
-        # dicts abaixo, que nao precisam de lock: cada URL e' visitada por
-        # exatamente UMA thread, uma vez so (garantido pelas rodadas: uma
-        # chave nunca aparece em dois lotes, porque so vira PENDING de novo se
-        # falhar, e falha nao repete a visita na MESMA rodada). Duas threads
-        # escrevendo chaves DIFERENTES do mesmo dict e' seguro sem lock (GIL).
+        # Protege os CONTADORES abaixo (`+=` nao e' atomico) e as decisoes de
+        # agendamento (reivindicar mais trabalho, ou desistir) — sao a MESMA
+        # secao critica: decidir "ainda ha orcamento?" e reivindicar tem que
+        # ser atomico junto, senao duas threads podem ler o mesmo orcamento
+        # restante e as duas reivindicarem, estourando o teto.
         self._stats_lock = threading.Lock()
-        # Metadados das paginas ja visitadas. Guardar aqui evita rebaixar a
-        # mesma landing page duas vezes: o metadado que identifica o documento
-        # (titulo, autores, resumo) esta na pagina que continha o link, e essa
-        # pagina ja foi baixada durante a travessia.
-        self._page_meta: dict[str, PageMetadata] = {}
+        self._reservadas = 0  # paginas reivindicadas nesta execucao (teto: max_pages)
+        self._emitidos = 0  # documentos emitidos nesta execucao (teto: max_documents)
+        self._em_voo = 0  # workers dentro de `_visitar()` agora mesmo
         # Quantos documentos cada pagina continha. Distingue LANDING PAGE (um
         # documento, e o metadado da pagina descreve esse documento) de PAGINA
         # DE LISTAGEM (varios documentos, e o metadado descreve a listagem, nao
         # cada arquivo). Sem essa distincao, os 40 PDFs de uma pagina de indice
-        # herdariam todos o mesmo titulo.
+        # herdariam todos o mesmo titulo. Escrita e leitura sempre pela MESMA
+        # thread (a que visitou `alvo.url`) antes de qualquer outra thread
+        # precisar da chave — seguro sem lock (ver `_expandir`).
         self._docs_por_pagina: dict[str, int] = {}
 
     # ------------------------------------------------------------------ ciclo
@@ -165,24 +187,82 @@ class Crawler:
         host = urlsplit(self.spec.seeds[0]).netloc.lower()
         return max(1, min(self.fetcher.policy_for(host).concurrency, 32))
 
+    def _orcamento_esgotado(self) -> bool:
+        """Chamado so' sob `self._stats_lock` — ve' `crawl()`/`_worker`."""
+        if self._reservadas >= self.spec.scope.max_pages:
+            return True
+        teto_docs = self.spec.scope.max_documents
+        return teto_docs is not None and self._emitidos >= teto_docs
+
     def crawl(self) -> Iterator[DocumentRecord]:
         inicio = time.monotonic()
+        # Orfas de uma execucao anterior que caiu entre reivindicar e
+        # resolver uma URL — sem isso, ficariam invisiveis para sempre.
+        reabertas = self.frontier.reabrir_reivindicadas()
+        if reabertas:
+            log.info("crawl.reivindicacoes_orfas_reabertas", fonte=self.spec.name, n=reabertas)
+
+        self._achados: queue.SimpleQueue[DocumentRecord] = queue.SimpleQueue()
+        self._concluido = threading.Event()
+        parar = threading.Event()
+
         self._semear()
 
         n_workers = self._max_workers_override or self._worker_count()
-        with ThreadPoolExecutor(max_workers=n_workers, thread_name_prefix="discover") as pool:
-            while self.stats.paginas_baixadas < self.spec.scope.max_pages:
-                restante = self.spec.scope.max_pages - self.stats.paginas_baixadas
-                lote = self.frontier.next_batch(min(n_workers, restante), kind=KIND_PAGE)
-                if not lote:
-                    break
-                futuros = [pool.submit(self._visitar, alvo) for alvo in lote]
-                for fut in as_completed(futuros):
-                    fut.result()  # relanca excecao de alguma thread, se houve
 
-        # Documentos descobertos durante a travessia viram registros no fim: o
-        # rastreamento identifica enderecos, quem baixa e a camada de fetch.
-        yield from self._emitir_documentos()
+        def _worker() -> None:
+            while not parar.is_set():
+                with self._stats_lock:
+                    alvo = None if self._orcamento_esgotado() else self.frontier.claim_next(kind=KIND_PAGE)
+                    if alvo is not None:
+                        self._reservadas += 1
+                        self._em_voo += 1
+                if alvo is not None:
+                    try:
+                        self._visitar(alvo)
+                    finally:
+                        with self._stats_lock:
+                            self._em_voo -= 1
+                    continue
+                # Nada pendente AGORA — mas outro worker pode estar dentro de
+                # `_visitar()` prestes a descobrir mais paginas. So' desiste
+                # de verdade quando ninguem mais estiver em voo; senao espera
+                # um instante e tenta reivindicar de novo.
+                with self._stats_lock:
+                    ninguem_em_voo = self._em_voo == 0
+                if ninguem_em_voo:
+                    self._concluido.set()
+                    return
+                if self._concluido.wait(timeout=0.05):
+                    return
+
+        threads = [
+            threading.Thread(target=_worker, name=f"{self.spec.name}-discover-{i}", daemon=True)
+            for i in range(n_workers)
+        ]
+        for t in threads:
+            t.start()
+
+        try:
+            while not self._concluido.is_set() or not self._achados.empty():
+                try:
+                    yield self._achados.get(timeout=0.1)
+                except queue.Empty:
+                    continue
+        finally:
+            # `parar` ANTES de esperar as threads: garante que nenhuma
+            # reivindique mais nada a partir daqui, entao o join abaixo espera
+            # no maximo a URL que cada worker ja tinha em maos, nao o resto do
+            # orcamento — e' o que faz `--limit`/`max_documents` de fato
+            # cortarem o tempo de rastreamento, nao so' o resultado.
+            parar.set()
+            for t in threads:
+                t.join(timeout=30)
+
+        # Residual: documentos cuja pagina-mae foi visitada numa execucao
+        # ANTERIOR (retomada) — a emissao normal ja aconteceu na hora, dentro
+        # de `_visitar`/`_expandir`. Ver `_emitir_pendentes`.
+        yield from self._emitir_pendentes()
 
         self.stats.segundos = time.monotonic() - inicio
         log.info(
@@ -207,6 +287,8 @@ class Crawler:
                 # melhor evidencia disponivel quando nao ha ancora real.
                 anchor=None,
             )
+            if e_doc:
+                self._emitir_agora(CrawlURL(url=url, depth=0, priority=1000.0, kind=KIND_DOCUMENT), md=None)
 
         if self.spec.sitemap == "none" or not self.spec.seeds:
             return
@@ -222,16 +304,20 @@ class Crawler:
                     continue
                 e_doc = self.spec.is_document_url(url)
                 score = self.scorer.score(url, depth=1, is_document=e_doc)
+                doc = CrawlURL(url=url, depth=1, priority=score.priority, kind=KIND_DOCUMENT if e_doc else KIND_PAGE)
                 if self.frontier.add(
                     url,
                     depth=1,
                     priority=score.priority,
-                    kind=KIND_DOCUMENT if e_doc else KIND_PAGE,
+                    kind=doc.kind,
                     anchor=None,  # sitemap nao tem ancora; ver nota em _semear
                 ):
                     self.stats.urls_do_sitemap += 1
+                    # Sitemap nao tem pagina-mae — nao ha metadado a esperar,
+                    # entao emite na hora (sem isso, um "kind=bulk"-like que so
+                    # usa sitemap nunca teria --limit/max_documents efetivo).
                     if e_doc:
-                        self.stats.documentos_encontrados += 1
+                        self._emitir_agora(doc, md=None)
             if self.stats.urls_do_sitemap:
                 # Um sitemap util dispensa procurar os outros.
                 break
@@ -239,59 +325,64 @@ class Crawler:
         if self.stats.urls_do_sitemap:
             log.info("crawl.sitemap", fonte=self.spec.name, urls=self.stats.urls_do_sitemap)
 
-    def _visitar(self, alvo) -> None:
+    def _visitar(self, alvo: CrawlURL) -> None:
         if not self._budget.allow(alvo.url):
             self.frontier.mark(alvo.url, STATE_SKIPPED, error="orcamento do host esgotado")
             return
 
+        # Tudo desde aqui — fetch, parse, expansao — numa unica rede de
+        # seguranca: uma pagina malformada (HTML que quebra o parser, por
+        # exemplo) nao pode derrubar o rastreamento inteiro. Antes so' o fetch
+        # tinha essa protecao; um bug de parsing numa unica pagina, entre
+        # centenas, propagava ate o chamador e perdia tudo que ainda nao
+        # tinha sido emitido.
         try:
             body, renderizado = self._buscar_pagina(alvo.url)
+            if body is None:
+                with self._stats_lock:
+                    self.stats.erros += 1
+                self.frontier.mark(alvo.url, STATE_FAILED, error="sem corpo")
+                return
+
+            with self._stats_lock:
+                self.stats.paginas_baixadas += 1
+                if renderizado:
+                    self.stats.paginas_renderizadas += 1
+            self.frontier.mark(alvo.url, STATE_VISITED, http_status=200)
+
+            soup = parse_html(body)
+
+            # A pagina pode ser, ela propria, uma landing page de documento:
+            # se o <head> declara citation_pdf_url, o PDF esta identificado
+            # sem adivinhar. `md` e' local desta chamada — nenhuma outra
+            # thread visita `alvo.url`, entao passar isso direto (em vez de
+            # guardar num dict compartilhado) e' seguro e mais simples.
+            md = extract_metadata(soup, alvo.url)
+
+            self._expandir(soup, alvo, md)
+            with self._stats_lock:
+                self.stats.curva.append((self.stats.paginas_baixadas, self.stats.documentos_encontrados))
+
+            if md.pdf_url:
+                score = self.scorer.score(md.pdf_url, anchor=md.title, depth=alvo.depth, is_document=True)
+                doc = CrawlURL(
+                    url=md.pdf_url, depth=alvo.depth, priority=score.priority + 5.0,
+                    kind=KIND_DOCUMENT, anchor=md.title or "(citation_pdf_url)", parent=alvo.url,
+                )
+                if self.frontier.add(
+                    doc.url, depth=doc.depth, priority=doc.priority, kind=KIND_DOCUMENT,
+                    anchor=doc.anchor, parent=alvo.url,
+                ):
+                    self._emitir_agora(doc, md)
         except BlockedByPolicy as exc:
             self.frontier.mark(alvo.url, STATE_SKIPPED, error=str(exc))
-            return
         except Exception as exc:
             with self._stats_lock:
                 self.stats.erros += 1
             self.frontier.mark(alvo.url, STATE_FAILED, error=str(exc))
             log.warning("crawl.erro_pagina", url=alvo.url, error=str(exc))
-            return
 
-        if body is None:
-            with self._stats_lock:
-                self.stats.erros += 1
-            self.frontier.mark(alvo.url, STATE_FAILED, error="sem corpo")
-            return
-
-        with self._stats_lock:
-            self.stats.paginas_baixadas += 1
-            if renderizado:
-                self.stats.paginas_renderizadas += 1
-        self.frontier.mark(alvo.url, STATE_VISITED, http_status=200)
-
-        soup = parse_html(body)
-
-        # A pagina pode ser, ela propria, uma landing page de documento: se o
-        # <head> declara citation_pdf_url, o PDF esta identificado sem adivinhar.
-        md = extract_metadata(soup, alvo.url)
-        self._page_meta[alvo.url] = md  # chave = alvo.url, unica desta thread — sem lock (ver __init__)
-
-        self._expandir(soup, alvo)
-        with self._stats_lock:
-            self.stats.curva.append((self.stats.paginas_baixadas, self.stats.documentos_encontrados))
-
-        if md.pdf_url:
-            score = self.scorer.score(md.pdf_url, anchor=md.title, depth=alvo.depth, is_document=True)
-            if self.frontier.add(
-                md.pdf_url,
-                depth=alvo.depth,
-                priority=score.priority + 5.0,  # declaracao explicita da propria pagina
-                kind=KIND_DOCUMENT,
-                anchor=md.title or "(citation_pdf_url)",
-                parent=alvo.url,
-            ):
-                self._registrar_documento(md.pdf_url, md.title, alvo.url, md)
-
-    def _expandir(self, soup, alvo) -> None:
+    def _expandir(self, soup, alvo: CrawlURL, md: PageMetadata) -> None:
         links = extract_links(soup, alvo.url, self.spec.document_extensions)
         with self._stats_lock:
             self.stats.links_vistos += len(links)
@@ -327,90 +418,110 @@ class Crawler:
                 depth=profundidade,
                 is_document=e_doc,
             )
+            doc = CrawlURL(
+                url=link.url, depth=profundidade, priority=score.priority,
+                kind=KIND_DOCUMENT if e_doc else KIND_PAGE, anchor=link.anchor, parent=alvo.url,
+            )
             novo = self.frontier.add(
-                link.url,
-                depth=profundidade,
-                priority=score.priority,
-                kind=KIND_DOCUMENT if e_doc else KIND_PAGE,
-                anchor=link.anchor,
-                parent=alvo.url,
+                doc.url, depth=doc.depth, priority=doc.priority, kind=doc.kind,
+                anchor=doc.anchor, parent=alvo.url,
             )
             if novo and e_doc:
-                self._registrar_documento(link.url, link.anchor, alvo.url, None, score.matched)
-
-    def _registrar_documento(
-        self,
-        url: str,
-        titulo: str | None,
-        pagina: str,
-        md: PageMetadata | None,
-        matched: list[str] | None = None,
-    ) -> None:
-        with self._stats_lock:
-            self.stats.documentos_encontrados += 1
+                # A pagina-mae (`alvo`) acabou de ser visitada por ESTA
+                # thread — o metadado dela (`md`) ja esta em maos, entao o
+                # documento e' emitido JA, sem esperar o rastreamento
+                # terminar (ver docstring do modulo).
+                self._emitir_agora(doc, md)
 
     # -------------------------------------------------------------- documentos
 
-    def _emitir_documentos(self) -> Iterator[DocumentRecord]:
-        """Converte os documentos descobertos em registros.
+    def _montar_registro(self, doc: CrawlURL, md: PageMetadata | None) -> DocumentRecord:
+        """Resolve titulo/metadado e monta o `DocumentRecord`. Usado tanto
+        pela emissao imediata (`_emitir_agora`, o caminho comum) quanto pelo
+        residual de retomada (`_emitir_pendentes`) — o MESMO criterio nos
+        dois, so' muda de onde `md` vem."""
+        # O metadado da pagina so descreve ESTE documento quando a pagina e
+        # de fato a landing page dele: ou porque declarou `citation_pdf_url`
+        # apontando para ca, ou porque continha um unico documento. Numa
+        # pagina de indice com dezenas de PDFs, o <title> descreve o indice
+        # — usa-lo daria a todos os arquivos o mesmo titulo errado.
+        e_landing = bool(md) and (
+            (md.pdf_url and canonicalize(md.pdf_url) == canonicalize(doc.url))
+            or self._docs_por_pagina.get(doc.parent or "", 99) == 1
+        )
+        md_doc = md if e_landing else None
 
-        A landing page (`parent`) e visitada apenas se ainda houver orcamento e
-        se ela nao tiver sido baixada: e dela que saem autores, data e resumo.
-        """
-        for doc in self.frontier.documents_found():
-            md = self._page_meta.get(doc.parent) if doc.parent else None
-            if md is None and doc.parent and self.stats.paginas_baixadas < self.spec.scope.max_pages:
-                md = self._metadados_da_landing(doc.parent)
-                if md is not None:
-                    self._page_meta[doc.parent] = md
+        titulo = _melhor_titulo(md_doc.title if md_doc else None, doc.anchor, doc.url)
 
-            # O metadado da pagina so descreve ESTE documento quando a pagina e
-            # de fato a landing page dele: ou porque declarou `citation_pdf_url`
-            # apontando para ca, ou porque continha um unico documento. Numa
-            # pagina de indice com dezenas de PDFs, o <title> descreve o indice
-            # — usa-lo daria a todos os arquivos o mesmo titulo errado.
-            e_landing = bool(md) and (
-                (md.pdf_url and canonicalize(md.pdf_url) == canonicalize(doc.url))
-                or self._docs_por_pagina.get(doc.parent or "", 99) == 1
-            )
-            md_doc = md if e_landing else None
-
-            titulo = _melhor_titulo(md_doc.title if md_doc else None, doc.anchor, doc.url)
-
-            # A relevancia so pode ser julgada AQUI, com o metadado resolvido.
-            # Julga-la na descoberta subestimaria tudo: em muitos repositorios o
-            # arquivo se chama "dot_78914_DS1.pdf" e nao carrega sinal nenhum —
-            # o titulo esta na landing page. E o mesmo criterio do pre-filtro
-            # (strong ou weak), aplicado igual nas duas estrategias.
-            if self.lexicon.score_text(titulo, md_doc.abstract if md_doc else None).tier != TIER_NEGATIVE:
+        # A relevancia so pode ser julgada AQUI, com o metadado resolvido.
+        # Julga-la na descoberta subestimaria tudo: em muitos repositorios o
+        # arquivo se chama "dot_78914_DS1.pdf" e nao carrega sinal nenhum —
+        # o titulo esta na landing page. E o mesmo criterio do pre-filtro
+        # (strong ou weak), aplicado igual nas duas estrategias.
+        relevante = self.lexicon.score_text(titulo, md_doc.abstract if md_doc else None).tier != TIER_NEGATIVE
+        with self._stats_lock:
+            if relevante:
                 self.stats.documentos_relevantes += 1
-            yield DocumentRecord(
-                source=self.spec.name,
-                source_id=_source_id(doc.url),
-                title=titulo,
-                abstract=md_doc.abstract if md_doc else None,
-                authors=md_doc.authors if md_doc else [],
-                organization=md_doc.publisher if md_doc else None,
-                pub_date=md_doc.date if md_doc else None,
-                doc_type=None,
-                subject_terms=md_doc.subjects if md_doc else [],
-                candidate_urls=[doc.url],
-                landing_url=doc.parent or doc.url,
-                rights=None,
-                export_control=False,
-                raw_metadata={
-                    "crawl": {
-                        "depth": doc.depth,
-                        "priority": round(doc.priority, 3),
-                        "anchor": doc.anchor,
-                        "parent": doc.parent,
-                        "strategy": self.spec.strategy,
-                    },
-                    "page_meta": (md_doc.raw if md_doc else {}),
+            self._emitidos += 1
+
+        return DocumentRecord(
+            source=self.spec.name,
+            source_id=_source_id(doc.url),
+            title=titulo,
+            abstract=md_doc.abstract if md_doc else None,
+            authors=md_doc.authors if md_doc else [],
+            organization=md_doc.publisher if md_doc else None,
+            pub_date=md_doc.date if md_doc else None,
+            doc_type=None,
+            subject_terms=md_doc.subjects if md_doc else [],
+            candidate_urls=[doc.url],
+            landing_url=doc.parent or doc.url,
+            rights=None,
+            export_control=False,
+            raw_metadata={
+                "crawl": {
+                    "depth": doc.depth,
+                    "priority": round(doc.priority, 3),
+                    "anchor": doc.anchor,
+                    "parent": doc.parent,
+                    "strategy": self.spec.strategy,
                 },
-            )
+                "page_meta": (md_doc.raw if md_doc else {}),
+            },
+        )
+
+    def _emitir_agora(self, doc: CrawlURL, md: PageMetadata | None) -> None:
+        """Converte um documento recem-descoberto em `DocumentRecord` e
+        entrega na hora — chamado de dentro de uma thread worker (`_semear`
+        roda antes delas existirem; `_visitar`/`_expandir` rodam dentro).
+        `self._achados` e' uma `queue.SimpleQueue`, segura para varios
+        produtores e um consumidor sem lock extra."""
+        with self._stats_lock:
+            self.stats.documentos_encontrados += 1
+        registro = self._montar_registro(doc, md)
+        self.frontier.mark(doc.url, STATE_EMITTED)
+        self._achados.put(registro)
+
+    def _emitir_pendentes(self) -> Iterator[DocumentRecord]:
+        """Residual: documentos cuja pagina-mae foi visitada numa execucao
+        ANTERIOR (processo diferente, sem retorno) — a unica forma de um
+        documento ainda estar PENDING aqui, ja que a emissao normal acontece
+        na hora (`_emitir_agora`). Roda de forma sequencial, DEPOIS que todas
+        as threads worker ja terminaram — sem concorrencia, sem lock
+        necessario para o fetch extra da landing page.
+        """
+        for doc in self.frontier.documentos_pendentes():
+            md = None
+            if doc.parent and self._reservadas < self.spec.scope.max_pages:
+                md = self._metadados_da_landing(doc.parent)
+            registro = self._montar_registro(doc, md)
+            self.frontier.mark(doc.url, STATE_EMITTED)
+            yield registro
 
     def _metadados_da_landing(self, url: str) -> PageMetadata | None:
+        """Busca extra, so' usada por `_emitir_pendentes` (fase sequencial,
+        sem outras threads rodando — por isso os incrementos abaixo dispensam
+        `self._stats_lock`)."""
         try:
             body, _ = self._buscar_pagina(url)
         except Exception:
@@ -418,6 +529,7 @@ class Crawler:
         if body is None:
             return None
         self.stats.paginas_baixadas += 1
+        self._reservadas += 1
         return extract_metadata(parse_html(body), url)
 
     # ------------------------------------------------------------------ apoio

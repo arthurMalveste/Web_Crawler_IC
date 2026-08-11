@@ -46,6 +46,17 @@ STATE_PENDING = "pending"
 STATE_VISITED = "visited"
 STATE_SKIPPED = "skipped"  # fora de escopo / armadilha / orcamento
 STATE_FAILED = "failed"
+#: PAGINA reivindicada por um worker, ainda em processamento — existe so'
+#: entre `claim_next()` e o `mark()` que a resolve. Se sobreviver ate o
+#: proximo `crawl()` desta fonte (processo anterior caiu no meio), e' orfa:
+#: `reabrir_reivindicadas()` devolve para PENDING.
+STATE_CLAIMED = "claimed"
+#: DOCUMENTO (kind=document) ja convertido em DocumentRecord e entregue ao
+#: chamador. Documentos nascem PENDING e so' viram EMITTED quando de fato
+#: emitidos — nunca ha um `state=visited` para kind=document (ver
+#: `Crawler._montar_registro`), entao contagens de pagina por `state=visited`
+#: continuam sem mistura.
+STATE_EMITTED = "emitted"
 
 KIND_PAGE = "page"
 KIND_DOCUMENT = "document"
@@ -171,6 +182,21 @@ class URLFrontier:
             self.conn.execute(sql, [state, utcnow_iso(), *fields.values(), self.source, url])
             self.conn.commit()
 
+    def reabrir_reivindicadas(self) -> int:
+        """Devolve para PENDING qualquer URL travada em CLAIMED — orfa de um
+        processo anterior que caiu (kill, crash, excecao nao tratada) entre
+        reivindicar a URL e resolve-la. Chamado no inicio de todo `crawl()`
+        (ver `Crawler.crawl`): sem isso, uma URL reivindicada e nunca resolvida
+        fica invisivel pra sempre (nem pending, nem visited), reduzindo
+        silenciosamente a cobertura da fonte a cada interrupcao."""
+        with self._lock:
+            cur = self.conn.execute(
+                "UPDATE urls SET state = ? WHERE source = ? AND state = ?",
+                (STATE_PENDING, self.source, STATE_CLAIMED),
+            )
+            self.conn.commit()
+            return cur.rowcount
+
     def requeue_failed(self, kind: str | None = None) -> int:
         """Devolve paginas `failed` desta fonte para `pending`.
 
@@ -232,6 +258,35 @@ class URLFrontier:
             for r in linhas
         ]
 
+    def claim_next(self, kind: str | None = None) -> CrawlURL | None:
+        """Reivindica atomicamente a PROXIMA URL pendente de maior prioridade:
+        SELECT e UPDATE->CLAIMED na mesma secao travada, sem liberar o lock
+        entre os dois. E' o que permite workers em fila continua (cada um
+        reivindica-processa-reivindica de novo, sem esperar os colegas de uma
+        rodada) sem duas threads pegarem a mesma URL — substitui o desenho por
+        RODADAS de `next_batch()` (mantido, ainda usado por quem quiser um
+        lote fechado; ver testes)."""
+        sql = "SELECT url, depth, priority, kind, anchor, parent FROM urls WHERE source = ? AND state = ?"
+        params: list[Any] = [self.source, STATE_PENDING]
+        if kind:
+            sql += " AND kind = ?"
+            params.append(kind)
+        sql += " ORDER BY priority DESC, depth ASC, rowid ASC LIMIT 1"
+        with self._lock, closing(self.conn.cursor()) as cur:
+            cur.execute(sql, params)
+            row = cur.fetchone()
+            if row is None:
+                return None
+            cur.execute(
+                "UPDATE urls SET state = ? WHERE source = ? AND url = ?",
+                (STATE_CLAIMED, self.source, row["url"]),
+            )
+            self.conn.commit()
+            return CrawlURL(
+                url=row["url"], depth=row["depth"], priority=row["priority"],
+                kind=row["kind"], anchor=row["anchor"], parent=row["parent"],
+            )
+
     def known(self, url: str) -> bool:
         with self._lock:
             cur = self.conn.execute(
@@ -254,15 +309,23 @@ class URLFrontier:
             ).fetchone()
         return row["n"]
 
-    def documents_found(self) -> Iterator[CrawlURL]:
-        # Busca tudo travado e SO ENTAO libera o lock para devolver um a um —
-        # um generator que segurasse o lock durante toda a iteracao prenderia
-        # qualquer outra thread ate o consumidor terminar.
+    def documentos_pendentes(self) -> Iterator[CrawlURL]:
+        """Documentos (kind=document) ainda NAO emitidos como DocumentRecord.
+
+        A maioria dos documentos e' emitida na hora, assim que descoberta (ver
+        `Crawler._emitir_agora`) — o que sobra aqui e' so' o residual: URLs de
+        documento que sobreviveram de uma execucao ANTERIOR interrompida antes
+        de serem emitidas (a pagina-mae ja foi visitada num processo que nao
+        existe mais, entao o metadado dela precisa ser rebuscado — ver
+        `Crawler._emitir_pendentes`). Reexecutar sobre uma fonte ja completa
+        nao reprocessa nada: documentos ja emitidos ficam em STATE_EMITTED,
+        fora desta consulta.
+        """
         with self._lock:
             linhas = self.conn.execute(
                 "SELECT url, depth, priority, kind, anchor, parent FROM urls "
-                "WHERE source = ? AND kind = ? ORDER BY priority DESC",
-                (self.source, KIND_DOCUMENT),
+                "WHERE source = ? AND kind = ? AND state = ? ORDER BY priority DESC",
+                (self.source, KIND_DOCUMENT, STATE_PENDING),
             ).fetchall()
         for r in linhas:
             yield CrawlURL(
