@@ -31,10 +31,6 @@ KIND_OAI = "oai"  # OAI-PMH (ROSA P)
 KIND_BULK = "bulk"  # dump CSV/XML (CORDIS)
 KIND_SEEDS = "seeds"  # lista fixa de URLs conhecidas
 
-#: Papel da fonte no corpus. Nem toda fonte existe para fornecer positivos.
-ROLE_POSITIVES = "positives"  # padrao: espera-se encontrar ConOps
-ROLE_HARD_NEGATIVES = "hard_negatives"  # existe para fornecer negativos dificeis
-
 DEFAULT_DOC_EXTENSIONS = (".pdf", ".doc", ".docx", ".ppt", ".pptx", ".xls", ".xlsx")
 
 
@@ -86,11 +82,6 @@ class SourceSpec:
     seeds: list[str] = field(default_factory=list)
     scope: Scope = field(default_factory=Scope)
     strategy: str = STRATEGY_FOCUSED
-
-    #: `hard_negatives` desliga a amostragem: coleta-se TODO o acervo. Amostrar
-    #: 1 em 8 de uma fonte que existe justamente para fornecer negativos
-    #: dificeis descartaria o material mais informativo da validacao.
-    role: str = ROLE_POSITIVES
 
     #: Extensoes tratadas como documento (nao como pagina a expandir).
     document_extensions: tuple[str, ...] = DEFAULT_DOC_EXTENSIONS

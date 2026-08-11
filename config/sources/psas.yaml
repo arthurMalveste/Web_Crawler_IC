@@ -1,14 +1,14 @@
 # MIT PSAS/PSASS — acervo do workshop STAMP.
 #
 # PAPEL NO CORPUS — diferente de todas as outras fontes: o PSAS NAO contem
-# ConOps. Contem apresentacoes SOBRE STPA. Entra por dois motivos:
-#
-#   1. Corpus de vocabulario para o dicionario lexico da Etapa 3.
-#   2. HARD NEGATIVES — documentos densos em terminologia de seguranca de
-#      sistemas que nao sao documentos de concepcao. Se o classificador da
-#      Etapa 5 acertar estes, esta aprendendo o padrao ConOps de verdade, e nao
-#      apenas detectando jargao de safety. E um dos conjuntos mais valiosos
-#      para a validacao.
+# ConOps, contem apresentacoes SOBRE STPA. Ate 2026-08-06 essa fonte tinha um
+# papel especial de "hard negatives" (coletava o acervo inteiro, sem amostragem,
+# para treinar um classificador da Etapa 5). Removido nessa data: guardar
+# negativo por antecipacao a uma etapa que o projeto colocou fora de escopo
+# gastava banda/disco de verdade sem uso nenhum agora (ver docs/handoff). O
+# PSAS continua na rotacao de `discover-all` como fonte comum — se algum
+# documento bater strong/weak no lexico, entra que nem qualquer outra fonte;
+# historicamente (nesta base, verificado em 2026-08-06) nunca bateu nenhum.
 #
 # Verificado em 2026-08-04: WordPress, HTML renderizado no servidor, sem JS.
 # A pagina de apresentacoes traz 538 links de arquivo em UMA requisicao — os
@@ -17,11 +17,6 @@
 name: psas
 kind: crawl
 strategy: focused
-
-# Desliga a amostragem da classe negativa: coleta-se o acervo INTEIRO. Numa
-# fonte que existe para fornecer negativos dificeis, amostrar 1 em 8
-# descartaria justamente o material mais informativo da validacao.
-role: hard_negatives
 
 seeds:
   - https://psas.scripts.mit.edu/home/mit-stamp-workshop-presentations/

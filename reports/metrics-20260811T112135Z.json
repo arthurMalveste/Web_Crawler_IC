@@ -1,0 +1,21 @@
+{
+  "por_status": {
+    "discovered": 30,
+    "failed": 1,
+    "skipped": 1,
+    "stored": 314
+  },
+  "por_faixa": {
+    "strong": 122,
+    "weak": 224
+  },
+  "por_fonte": {
+    "faa": 7,
+    "ntrs": 322,
+    "rosap": 17
+  },
+  "volume_gb": 0.17,
+  "conteudos_unicos": 314,
+  "conteudos_em_multiplas_fontes": 0,
+  "sobreposicao_por_par": {}
+}

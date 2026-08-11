@@ -400,32 +400,20 @@ class TestPreferenciaPorTextoExtraido:
         assert list(store.text.rglob("*.txt")), "o texto deve ir para data/text/"
 
 
-class TestAmostragemDaClasseNegativa:
+class TestNegativoNaoEGuardado:
+    """Decisao de 2026-08-06: Etapa 1 nao julga ConOps, e guardar negativo
+    "para o classificador da Etapa 5" gastava banda/disco de verdade (76% do
+    corpus, medido ao vivo) por uma etapa fora de escopo agora. Se o lexico
+    ja sinalizou ausencia de indicio, o candidato nem entra na fila."""
+
     @respx.mock
-    def test_negativos_sao_coletados(self, ambiente):
-        """Sem classe negativa nao ha precisao, recall nem F1 na Etapa 5."""
+    def test_negativos_nunca_entram_na_fila(self, ambiente):
         pipeline, frontier, _ = ambiente
         recs = [
             make_rec("ntrs", str(i), f"https://ntrs.nasa.gov/{i}.pdf", titulo="Thermal Analysis of Panels")
             for i in range(400)
         ]
-        pipeline.discover(FakeAdapter(recs))
-        faixas = frontier.counts_by("tier")
-        assert faixas.get("negative_sample", 0) > 0
-
-    @respx.mock
-    def test_flag_desliga_a_amostragem(self, tmp_path, fetcher):
-        frontier = Frontier(tmp_path / "g.sqlite")
-        p = Pipeline(
-            frontier,
-            Store(tmp_path),
-            fetcher,
-            Lexicon.load(ROOT / "config" / "lexicon.yaml"),
-            collect_negatives=False,
-        )
-        recs = [
-            make_rec("ntrs", str(i), f"https://x/{i}.pdf", titulo="Thermal Analysis") for i in range(200)
-        ]
-        p.discover(FakeAdapter(recs))
+        stats = pipeline.discover(FakeAdapter(recs))
         assert frontier.counts_by("tier").get("negative_sample", 0) == 0
-        frontier.close()
+        assert stats.por_faixa.get("negative_sample", 0) == 0
+        assert stats.por_faixa.get("descartado", 0) == 400

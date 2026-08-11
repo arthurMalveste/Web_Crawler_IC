@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from crawler.core.prefilter import Lexicon, NegativeSampler, normalize
+from crawler.core.prefilter import Lexicon, normalize
 from crawler.core.record import TIER_NEGATIVE, TIER_STRONG, TIER_WEAK, DocumentRecord
 
 CONFIG = Path(__file__).resolve().parent.parent / "config" / "lexicon.yaml"
@@ -114,37 +114,14 @@ class TestFaixaNegativa:
         assert lex.score_text(titulo, None).tier == TIER_NEGATIVE
 
 
-class TestHardNegativesPSAS:
+class TestJargaoDeSafetyPSAS:
     def test_jargao_de_safety_nao_e_conops(self, lex):
-        """Acervo PSAS: denso em terminologia STPA, mas nao sao ConOps.
-
-        Se o classificador acertar estes, esta aprendendo o padrao ConOps de
-        verdade e nao apenas detectando jargao de safety.
-        """
+        """Acervo PSAS: denso em terminologia STPA, mas nao sao ConOps — a
+        classificacao de tier continua correta mesmo sem a maquina de hard
+        negatives (removida em 2026-08-06) que existia so para guardar isso."""
         r = rec(
             "STPA Applied to Automotive Steering",
             "Hazard analysis using the safety control structure and unsafe control actions.",
         )
         br = lex.score_record(r)
         assert br.tier == TIER_NEGATIVE
-        assert lex.is_safety_jargon(r)
-
-
-class TestAmostragemNegativa:
-    def test_deterministica(self, lex):
-        """Reexecutar a coleta deve selecionar exatamente os mesmos negativos."""
-        registros = [
-            DocumentRecord(source="ntrs", source_id=str(i), title="x", landing_url="u")
-            for i in range(500)
-        ]
-        a = NegativeSampler(lex.neg_cap, lex.neg_seed)
-        b = NegativeSampler(lex.neg_cap, lex.neg_seed)
-        assert [a.accept(r) for r in registros] == [b.accept(r) for r in registros]
-
-    def test_respeita_teto_por_fonte(self, lex):
-        s = NegativeSampler(cap=10, seed=1)
-        registros = [
-            DocumentRecord(source="ntrs", source_id=str(i), title="x", landing_url="u")
-            for i in range(5000)
-        ]
-        assert sum(s.accept(r) for r in registros) == 10

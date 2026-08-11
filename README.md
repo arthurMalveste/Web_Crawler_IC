@@ -87,7 +87,7 @@ python -m crawler.cli report --data-root D:/outro/Corpus            # ou por fla
 python -m crawler.cli discover ntrs  --year-start 2015 --year-end 2026   # API
 python -m crawler.cli discover rosap --max-pages 40                      # OAI-PMH
 python -m crawler.cli discover faa   --max-pages 200                     # crawler
-python -m crawler.cli discover psas  --max-pages 120                     # hard negatives
+python -m crawler.cli discover psas  --max-pages 120
 
 # Todas as fontes configuradas numa invocação só — uma que falhar não trava as outras
 python -m crawler.cli discover-all
@@ -129,10 +129,14 @@ python -m webui.app   # abre em http://127.0.0.1:5000
 |---|---:|
 | `strong` (sinal forte no título) | 92 |
 | `weak` (sinal no abstract/subject) | 224 |
-| `hard_negative` (acervo PSAS) | 627 |
-| `negative_sample` (negativos fáceis) | 856 |
 
 Por fonte: PSAS 703 · ROSA P 417 · FAA 383 · NTRS 295.
+
+> Números desta seção são um retrato de 2026-08-04. Nessa data o pré-filtro
+> ainda guardava as faixas `hard_negative`/`negative_sample` (foram 627 e
+> 856 candidatos, respectivamente) — essa amostragem foi **removida em
+> 2026-08-06** (ver "Pré-filtro léxico" abaixo), então uma coleta nova não
+> reproduz mais essas duas linhas.
 
 Quatro números sustentam as decisões de arquitetura:
 
@@ -149,7 +153,7 @@ Idempotência verificada em produção: reexecutar a descoberta no mesmo escopo 
 |---|---|---|
 | **NTRS / NASA STI** | API REST dedicada | ✅ coletando |
 | **ROSA P (US DOT)** | OAI-PMH + coleta incremental | ✅ coletando |
-| **MIT PSAS** (*hard negatives*) | crawler | ✅ 703 documentos |
+| **MIT PSAS** | crawler | ✅ rastreia — nunca rendeu `strong`/`weak` nesta base |
 | **FAA** | crawler | ✅ 4.175 URLs via sitemap |
 | **ESA Cosmos** | crawler | ✅ roda — pouco material público |
 | **ESA EOF** | crawler + Playwright | ⚠️ rastreia, mas arquivos não são públicos |
@@ -174,9 +178,17 @@ Decide, **a partir do metadado**, se vale baixar o arquivo. É aqui que se ganha
 |---|---|---|
 | `strong` | sinal forte no título, sem marcador adversarial | baixar sempre |
 | `weak` | sinal em abstract/subject, ou `strong` rebaixado | baixar, marcar para revisão |
-| `negative_sample` | sem sinal | amostrar N por fonte e baixar |
+| `negative_sample` | sem sinal | descartar — não entra na fila |
 
-A terceira faixa não é opcional. O objetivo final é um **classificador binário**; sem classe negativa não há precisão, recall nem F1, e a Etapa 5 vira demonstração em vez de avaliação. A amostragem é determinística (semente fixa + hash do id): reexecutar a coleta seleciona exatamente os mesmos negativos.
+**Decisão de 2026-08-06:** até essa data o pré-filtro também amostrava e
+guardava a classe negativa (~1 em 8 por fonte, mais um acervo inteiro do MIT
+PSAS como *hard negative*) para eventualmente treinar um classificador na
+Etapa 5. Removido: a Etapa 1 não julga ConOps, e guardar negativo "para o
+classificador" emprestava legitimidade de uma etapa que o próprio projeto já
+tinha colocado fora de escopo — o custo era real (76% do volume em disco
+medido nesta data). Se a Etapa 5 acontecer, a amostragem determinística
+continua no histórico do git e pode ser reintroduzida então — não precisa
+existir agora, sem uso nenhum.
 
 O léxico ([config/lexicon.yaml](config/lexicon.yaml)) inclui a **assinatura estrutural** da ISO/IEC/IEEE 29148:2011 e da ANSI/AIAA G-043A-2012 — títulos de seção canônicos são sinal muito mais específico que o termo isolado. Ele é reaproveitado integralmente na Etapa 3 e vira base do *prompt* da Etapa 5.
 

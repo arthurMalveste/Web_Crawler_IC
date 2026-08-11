@@ -137,7 +137,6 @@ class TestPendingBySource:
 
         assert metrics.pending_by_source(isolado, ["strong"]) == {"ntrs": 1}
         assert metrics.pending_by_source(isolado, ["strong", "weak"]) == {"ntrs": 2}
-        assert metrics.pending_by_source(isolado, ["negative"]) == {"rosap": 1}
 
     def test_sem_faixa_marcada_nao_filtra(self, isolado):
         """Documenta o comportamento: nenhuma faixa = TODAS entram, igual a

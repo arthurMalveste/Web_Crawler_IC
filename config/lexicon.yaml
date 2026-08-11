@@ -108,8 +108,9 @@ adversarial_markers:
   - course outline
 
 # --- VOCABULARIO DE SAFETY / STPA -------------------------------------------
-# Nao indica ConOps. Serve para (a) identificar os *hard negatives* do acervo
-# PSAS e (b) alimentar o dicionario da Etapa 3.
+# Nao indica ConOps. Reservado para alimentar o dicionario da Etapa 3 — nao
+# consumido por nenhum codigo desta etapa hoje (o uso anterior, identificar
+# hard negatives do acervo PSAS, foi removido em 2026-08-06).
 safety_terms:
   - stpa
   - stamp
@@ -140,9 +141,3 @@ thresholds:
   strong_min_score: 10.0
   # weak: qualquer sinal relevante fora do titulo, ou strong rebaixado.
   weak_min_score: 2.5
-
-# Amostragem da classe negativa (sem a qual nao ha como medir precisao/recall
-# na Etapa 5). Numeros por fonte, aplicados na descoberta.
-negative_sampling:
-  per_source_cap: 400
-  seed: 20260804

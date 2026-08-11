@@ -14,16 +14,13 @@ from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
-# Faixas do pre-filtro lexico (ver prefilter.py).
+# Faixas do pre-filtro lexico (ver prefilter.py). TIER_NEGATIVE so classifica
+# (decide que o candidato nao entra na fila) — desde 2026-08-06 nada guarda
+# um documento negativo (o antigo TIER_HARD_NEGATIVE do acervo PSAS foi
+# removido junto: era so' amostragem para um classificador fora de escopo).
 TIER_STRONG = "strong"
 TIER_WEAK = "weak"
 TIER_NEGATIVE = "negative_sample"
-#: Negativo DIFICIL: documento denso em terminologia de seguranca de sistemas
-#: que nao e documento de concepcao (tipicamente o acervo MIT PSAS). Distinto do
-#: negativo facil porque nao e amostrado — coleta-se tudo. Se o classificador da
-#: Etapa 5 acertar estes, esta aprendendo o padrao ConOps e nao apenas
-#: detectando jargao de safety.
-TIER_HARD_NEGATIVE = "hard_negative"
 
 
 def utcnow_iso() -> str:
