@@ -108,7 +108,7 @@ class TestDiscoverAll:
         assert "ntrs" in chamadas, "as demais fontes continuam rodando normalmente"
 
     def test_roda_todas_as_fontes_configuradas_por_padrao(self, tmp_path, monkeypatch):
-        """Sem --only/--skip, cobre as 7 do YAML mais ntrs e rosap."""
+        """Sem --only/--skip, cobre as 7 do YAML mais ntrs, rosap e core."""
         chamadas: list[str] = []
 
         def fake_make_adapter(nome, *a, **kw):
@@ -119,7 +119,7 @@ class TestDiscoverAll:
         args = _args(data_root=str(tmp_path))
         cli.cmd_discover_all(args)
 
-        esperado = {"ntrs", "rosap"} | {p.stem for p in cli.SOURCES_DIR.glob("*.yaml")}
+        esperado = {"ntrs", "rosap", "core"} | {p.stem for p in cli.SOURCES_DIR.glob("*.yaml")}
         assert set(chamadas) == esperado
 
     def test_documentos_descobertos_entram_na_fila(self, tmp_path, monkeypatch):

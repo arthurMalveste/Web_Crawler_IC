@@ -1,0 +1,68 @@
+{
+  "totalHits": 4482055,
+  "limit": 5,
+  "offset": 0,
+  "results": [
+    {
+      "id": 131932746,
+      "title": "U-space concept of operations: A key enabler for opening airspace to emerging low-altitude operations",
+      "abstract": "Opening the sky to new classes of airspace user is a political and economic imperative for the European Union. The CORUS project has developed a concept of operations for drones flying in Europe in very low-level airspace.",
+      "authors": [
+        {"name": "Barrado Muxi, Cristina"},
+        {"name": "Pastor Llorens, Enric"}
+      ],
+      "yearPublished": 2020,
+      "publishedDate": "2020-03-01T00:00:00+00:00",
+      "documentType": "",
+      "fieldOfStudy": "Article",
+      "doi": "10.3390/aerospace7030024",
+      "downloadUrl": "https://core.ac.uk/download/644237250.pdf",
+      "sourceFulltextUrls": ["https://upcommons.upc.edu/bitstream/2117/327249/1/aerospace-07-00024-v2.pdf"],
+      "fullText": "Opening the sky to new classes of airspace user is a political and economic imperative...",
+      "dataProviders": [
+        {"id": 1011, "name": "UPCommons. Portal del coneixement obert de la UPC"}
+      ],
+      "identifiers": [
+        {"identifier": "10.3390/aerospace7030024", "type": "doi"}
+      ],
+      "links": [
+        {"type": "download", "url": "https://core.ac.uk/download/644237250.pdf"},
+        {"type": "display", "url": "https://core.ac.uk/works/131932746"}
+      ]
+    },
+    {
+      "id": 7429852,
+      "title": "LAI Concept of Operations",
+      "abstract": "",
+      "authors": [{"name": "Stewart, Leann"}],
+      "yearPublished": 2013,
+      "publishedDate": "",
+      "documentType": "",
+      "fieldOfStudy": "Report",
+      "doi": null,
+      "downloadUrl": "",
+      "sourceFulltextUrls": ["http://dspace.mit.edu/bitstream/1721.1/83566/1/CHM_STEW_BR_leannow.pdf"],
+      "fullText": "Not available for public API users.",
+      "dataProviders": [{"id": 42, "name": "DSpace@MIT"}],
+      "identifiers": [],
+      "links": [{"type": "display", "url": "https://core.ac.uk/works/7429852"}]
+    },
+    {
+      "id": 15249161,
+      "title": "Abstract Model of the SATS Concept of Operations: Initial Results and Recommendations",
+      "abstract": "A formal model of the Small Aircraft Transportation System concept of operations.",
+      "authors": [{"name": "Dowek, Gilles"}, {"name": "Munoz, Cesar"}],
+      "yearPublished": 2004,
+      "publishedDate": "",
+      "documentType": "",
+      "fieldOfStudy": "Technical Report",
+      "doi": null,
+      "downloadUrl": "",
+      "sourceFulltextUrls": [],
+      "fullText": "Not available for public API users.",
+      "dataProviders": [{"id": 7, "name": "NASA Technical Reports Server"}],
+      "identifiers": [],
+      "links": [{"type": "display", "url": "https://core.ac.uk/works/15249161"}]
+    }
+  ]
+}

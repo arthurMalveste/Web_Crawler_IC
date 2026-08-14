@@ -1,52 +1,154 @@
 # CORDIS — projetos de pesquisa da Comissao Europeia.
 #
-# ESTRATEGIA HIBRIDA. O CORDIS nao deve ser rastreado pagina a pagina: existem
-# bulk downloads mensais em data.europa.eu (XML/CSV/XLS/JSON) por framework
-# programme, incluindo o subconjunto "projectDeliverables" — metadados mais
-# links para os entregaveis, que e exatamente o que interessa. Baixar o CSV
-# custa segundos; filtrar em pandas custa segundos. Rastrear custaria horas.
+# HISTORICO — por que isto NAO e' um adaptador bulk (2026-08-12):
 #
-# O crawler entra so na segunda etapa: seguir os links de entregavel que
-# sobreviveram ao filtro offline.
+# O plano original (ver git log) era um adaptador dedicado lendo os dumps
+# mensais CSV/XML/XLSX de data.europa.eu (`cordis-HORIZONprojectDeliverables
+# -csv.zip`, `cordis-h2020projectDeliverables-csv.zip`, etc.), filtrando por
+# programa prioritario ANTES do filtro lexico. Foi verificado ao vivo que o
+# desenho funciona: dos ~254 mil entregaveis totais (HORIZON + H2020), o
+# filtro de programa reduz para ~26 mil, e o lexico deste projeto reduz esse
+# numero para 142 candidatos plausiveis — a lista de `seeds` abaixo vem
+# exatamente dessa verificacao.
 #
-# ALERTA DE PRECISAO: a maioria esmagadora dos entregaveis CORDIS e ruido para
-# este projeto (dissemination plan, progress report, questionnaire). O ganho
-# esta em nichos — sobretudo SESAR JU (ConOps de gerenciamento de trafego
-# aereo) e clusters de aeronautica e espaco. Por isso o filtro de programa vem
-# ANTES do filtro lexico.
+# MAS o download desses arquivos bulk mora em `cordis.europa.eu/data/`, e o
+# `robots.txt` do CORDIS tem `Disallow: /data/` — confirmado com o
+# `robotparser` real do projeto, nao por leitura superficial. Diferente do
+# caso FAA/DTIC (onde o bloqueio e' um WAF generico contra bot, nao a
+# politica declarada da instituicao — ver docs/achados-api.md), aqui e' o
+# proprio `robots.txt` do CORDIS dizendo explicitamente para nao automatizar
+# aquele caminho. Decisao do projeto (2026-08-12): respeitar o robots.txt e
+# NAO usar os dumps bulk, mesmo com um "European Commission reuse notice"
+# anexado ao dataset em data.europa.eu — reuso de dados nao e' permissao de
+# rastreamento.
+#
+# SOLUCAO ADOTADA: `kind: seeds` — os 86 projetos cujos entregaveis JA FORAM
+# verificados (via a mesma investigacao acima, antes de descartar a via bulk)
+# como tendo pelo menos um entregavel de indicio forte/fraco. A pagina de
+# resultados de cada projeto (`/project/id/{id}/results`) E' permitida pelo
+# robots.txt, e contem os entregaveis como links com o TITULO REAL como
+# ancora — e' dai que o titulo de cada documento vem, ver nota tecnica
+# abaixo. Isso cobre os projetos ja identificados; novos projetos SESAR/
+# Cluster 5 exigiriam nova curadoria manual (a via automatica de descoberta
+# ampla continua bloqueada por robots.txt).
+#
+# NOTA TECNICA — o link do entregavel nunca e' o arquivo em si: e' uma pagina
+# HTML ("Documents download module", em ec.europa.eu) que redireciona por
+# JAVASCRIPT (`window.location='...'`), nao por link nem HTTP 30x. Suportado
+# de forma generica em `engine/extract.py::_wrapper_de_download_js` (mesmo
+# mecanismo de `citation_pdf_url`, so' que o titulo vem da ANCORA que levou
+# ate' a pagina — o <title> do wrapper e' sempre o mesmo texto generico,
+# ver `engine/crawler.py::_visitar`).
 
 name: cordis
-kind: bulk
+kind: seeds
 strategy: focused
 
 seeds:
-  - https://cordis.europa.eu/about/services
-
-options:
-  # Preenchido pelo adaptador de bulk; o crawler generico so segue os links
-  # aprovados no filtro offline.
-  bulk_portal: https://data.europa.eu/data/datasets?query=cordis
-  programas_prioritarios:
-    - SESAR
-    - H2020-SESAR
-    - HORIZON-SESAR
-    - H2020-EU.3.4.   # Transportes inteligentes, verdes e integrados
-    - HORIZON.2.5     # Cluster 5 — Clima, Energia e Mobilidade
-  subconjuntos:
-    - projectDeliverables
-    - reportSummaries
+  - https://cordis.europa.eu/project/id/636012/results  # ELIPTIC
+  - https://cordis.europa.eu/project/id/689074/results  # HOLISHIP
+  - https://cordis.europa.eu/project/id/698824/results  # MALORCA
+  - https://cordis.europa.eu/project/id/699275/results  # OptiFrame
+  - https://cordis.europa.eu/project/id/699338/results  # APACHE
+  - https://cordis.europa.eu/project/id/699340/results  # AURORA
+  - https://cordis.europa.eu/project/id/699370/results  # RETINA
+  - https://cordis.europa.eu/project/id/723509/results  # MoNIfly
+  - https://cordis.europa.eu/project/id/730640/results  # X2Rail-1
+  - https://cordis.europa.eu/project/id/730818/results  # FINE 1
+  - https://cordis.europa.eu/project/id/730836/results  # SMART
+  - https://cordis.europa.eu/project/id/730843/results  # CYRail
+  - https://cordis.europa.eu/project/id/731765/results  # PJ19 CI
+  - https://cordis.europa.eu/project/id/734145/results  # PJ25 XSTREAM
+  - https://cordis.europa.eu/project/id/763551/results  # CORUS
+  - https://cordis.europa.eu/project/id/763601/results  # DroC2om
+  - https://cordis.europa.eu/project/id/763658/results  # AIRPASS
+  - https://cordis.europa.eu/project/id/763671/results  # DREAMS
+  - https://cordis.europa.eu/project/id/763719/results  # CLASS
+  - https://cordis.europa.eu/project/id/776293/results  # GAUSS
+  - https://cordis.europa.eu/project/id/776379/results  # GRIMASSE
+  - https://cordis.europa.eu/project/id/783183/results  # GATEMAN
+  - https://cordis.europa.eu/project/id/783198/results  # EMPHASIS
+  - https://cordis.europa.eu/project/id/783206/results  # Domino
+  - https://cordis.europa.eu/project/id/783228/results  # GAINS
+  - https://cordis.europa.eu/project/id/783270/results  # ENVISION
+  - https://cordis.europa.eu/project/id/784273/results  # SAFTInspect
+  - https://cordis.europa.eu/project/id/826347/results  # MOVINGRAIL
+  - https://cordis.europa.eu/project/id/831993/results  # E-PILOTS
+  - https://cordis.europa.eu/project/id/861635/results  # 5D-AeroSafe
+  - https://cordis.europa.eu/project/id/874473/results  # PJ19-W2 CI
+  - https://cordis.europa.eu/project/id/875041/results  # SOLUTIONSplus
+  - https://cordis.europa.eu/project/id/875530/results  # SHOW
+  - https://cordis.europa.eu/project/id/875588/results  # TRIPS
+  - https://cordis.europa.eu/project/id/881574/results  # IN2SMART2
+  - https://cordis.europa.eu/project/id/881779/results  # Translate4Rail
+  - https://cordis.europa.eu/project/id/881782/results  # RAILS
+  - https://cordis.europa.eu/project/id/881791/results  # FINE-2
+  - https://cordis.europa.eu/project/id/885919/results  # FMPMet
+  - https://cordis.europa.eu/project/id/890378/results  # USEPE
+  - https://cordis.europa.eu/project/id/890417/results  # ECHO
+  - https://cordis.europa.eu/project/id/891061/results  # X-TEAM D2D
+  - https://cordis.europa.eu/project/id/891287/results  # IMHOTEP
+  - https://cordis.europa.eu/project/id/892440/results  # URClearED
+  - https://cordis.europa.eu/project/id/892542/results  # FARO
+  - https://cordis.europa.eu/project/id/892618/results  # AISA
+  - https://cordis.europa.eu/project/id/892869/results  # AEON
+  - https://cordis.europa.eu/project/id/892970/results  # MAHALO
+  - https://cordis.europa.eu/project/id/893204/results  # START
+  - https://cordis.europa.eu/project/id/893206/results  # BUBBLES
+  - https://cordis.europa.eu/project/id/893375/results  # INVIRCAT
+  - https://cordis.europa.eu/project/id/893568/results  # DYNCAT
+  - https://cordis.europa.eu/project/id/893864/results  # DACUS
+  - https://cordis.europa.eu/project/id/894593/results  # ICARUS
+  - https://cordis.europa.eu/project/id/894616/results  # FACT
+  - https://cordis.europa.eu/project/id/953783/results  # DIT4TraM
+  - https://cordis.europa.eu/project/id/101006443/results  # SATURN
+  - https://cordis.europa.eu/project/id/101006601/results  # AiRMOUR
+  - https://cordis.europa.eu/project/id/101006696/results  # ASSURED-UAM
+  - https://cordis.europa.eu/project/id/101007134/results  # AURORA (HORIZON)
+  - https://cordis.europa.eu/project/id/101007226/results  # e-SHyIPS
+  - https://cordis.europa.eu/project/id/101008005/results  # REPS
+  - https://cordis.europa.eu/project/id/101017702/results  # AMU-LED
+  - https://cordis.europa.eu/project/id/101036996/results  # TULIPS
+  - https://cordis.europa.eu/project/id/101056866/results  # EFACA
+  - https://cordis.europa.eu/project/id/101069491/results  # CANMILK
+  - https://cordis.europa.eu/project/id/101069748/results  # SELFY
+  - https://cordis.europa.eu/project/id/101075424/results  # HVDC-WISE
+  - https://cordis.europa.eu/project/id/101102001/results  # FP2 - R2DATO
+  - https://cordis.europa.eu/project/id/101102009/results  # FP5 - TRANS4M-R
+  - https://cordis.europa.eu/project/id/101114684/results  # ASTAIR
+  - https://cordis.europa.eu/project/id/101114686/results  # SMARTS
+  - https://cordis.europa.eu/project/id/101114765/results  # CODA
+  - https://cordis.europa.eu/project/id/101114787/results  # ASTRA
+  - https://cordis.europa.eu/project/id/101114789/results  # Green-GEAR
+  - https://cordis.europa.eu/project/id/101114805/results  # AI4HyDrop
+  - https://cordis.europa.eu/project/id/101114815/results  # MultiModX
+  - https://cordis.europa.eu/project/id/101121851/results  # MaDe4Rail
+  - https://cordis.europa.eu/project/id/101138379/results  # GOLIAT
+  - https://cordis.europa.eu/project/id/101147321/results  # MEGA WAVE PTO
+  - https://cordis.europa.eu/project/id/101147693/results  # AUTOMOTIF
+  - https://cordis.europa.eu/project/id/101166763/results  # CORUS five
+  - https://cordis.europa.eu/project/id/101166837/results  # STEPLESS
+  - https://cordis.europa.eu/project/id/101166935/results  # DeepFlow
+  - https://cordis.europa.eu/project/id/101166947/results  # ANTICIPATE
+  - https://cordis.europa.eu/project/id/101167442/results  # AWARE
 
 scope:
   allow_hosts:
     - cordis.europa.eu
     - ec.europa.eu
-    - data.europa.eu
+  # Restrito de proposito: so' as paginas de projeto (onde estao os
+  # entregaveis conhecidos) e o modulo de download que os serve. Sem isso o
+  # crawler vazaria para o resto do cordis.europa.eu (busca, estatisticas,
+  # outros projetos nao curados) — o oposto do desenho "niche" desta fonte.
+  allow_paths:
+    - '^/project/id/'
+    - '^/research/participants/documents/downloadPublic'
   deny_paths:
     - '/search'
     - '/programme/'
     - '/statistics'
   max_depth: 2
-  max_pages: 300
+  max_pages: 2000
   same_host_only: false
 
 sitemap: none
@@ -54,6 +156,9 @@ render: false
 
 notes: >
   Reuso incentivado, sujeito as condicoes de copyright; citar a fonte.
-  Alternativa ao bulk: endpoint SPARQL do grafo EURIO.
-  Ordem de grandeza: Horizon Europe tem ~1.180 entregaveis; H2020 tem dezenas
-  de milhares — dai a necessidade do filtro de programa.
+  Lista de seeds fechada por curadoria manual (2026-08-12) — nao cresce
+  sozinha. Para ampliar a cobertura de SESAR/Cluster 5 sem violar o
+  robots.txt do CORDIS, o caminho e' revisitar periodicamente
+  https://cordis.europa.eu/search com os mesmos termos do lexico (pagina de
+  busca normal, nao os dumps bulk) e curar manualmente os IDs de projeto
+  novos — nao ha' hoje descoberta automatica desta fonte.

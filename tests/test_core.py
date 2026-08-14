@@ -13,6 +13,7 @@ import httpx
 import pytest
 import respx
 
+from crawler.adapters.crawl import CrawlAdapter
 from crawler.core.fetcher import BlockedByPolicy, Config, Fetcher, NotADocument, _crawl_delay, sniff_kind
 from crawler.core.frontier import (
     STATUS_DISCOVERED,
@@ -24,6 +25,7 @@ from crawler.core.pipeline import Pipeline
 from crawler.core.prefilter import Lexicon
 from crawler.core.record import DocumentRecord, canonical_url
 from crawler.core.store import Store
+from crawler.engine.spec import STRATEGY_BFS, Scope, SourceSpec
 
 ROOT = Path(__file__).resolve().parent.parent
 PDF = b"%PDF-1.7\n" + b"x" * 400 + b"\n%%EOF"
@@ -417,3 +419,96 @@ class TestNegativoNaoEGuardado:
         assert frontier.counts_by("tier").get("negative_sample", 0) == 0
         assert stats.por_faixa.get("negative_sample", 0) == 0
         assert stats.por_faixa.get("descartado", 0) == 400
+
+
+class TestLimiteEmFontesDeCrawl:
+    """Achado real de 2026-08-12: `Pipeline.discover(limit=N)` dava `break` no
+    `for rec in adapter.discover():` assim que `N` novos registros chegavam.
+    Para um `CrawlAdapter`, isso fecha a cadeia de generators no meio
+    (`CrawlAdapter.discover()` -> `yield from Crawler.crawl()`) — o CPython
+    lanca `GeneratorExit` no ponto suspenso, o que pula a varredura final do
+    crawler (`_emitir_pendentes`) e qualquer `DocumentRecord` que threads em
+    paralelo ja tinham posto na fila em memoria mas o consumidor ainda nao
+    tinha puxado. A fonte real que expos isso: um `discover-all --limit N`
+    (o jeito normal deste projeto rodar) na FAA, ESA Cosmos etc.
+    """
+
+    @respx.mock
+    def test_limit_nao_descarta_documentos_ja_encontrados(self, tmp_path, fetcher):
+        # Uma unica pagina com muitos documentos relevantes: o worker enfileira
+        # todos de uma vez (sem I/O de rede entre um e outro), entao a fila em
+        # memoria (`Crawler._achados`) acumula bem mais que `limit` itens antes
+        # do consumidor sequer puxar o primeiro — o cenario exato em que o
+        # `break` antigo perdia o resto.
+        html = "".join(
+            f'<a href="/files/conops-{i}-concept-of-operations.pdf">ConOps {i}</a>'
+            for i in range(20)
+        )
+        respx.get("https://ex.org/").mock(return_value=httpx.Response(200, html=html))
+        respx.get(url__startswith="https://ex.org/files/").mock(
+            return_value=httpx.Response(200, content=b"%PDF-")
+        )
+        spec = SourceSpec(
+            name="ex",
+            seeds=["https://ex.org/"],
+            strategy=STRATEGY_BFS,
+            sitemap="none",
+            scope=Scope(allow_hosts=["ex.org"], max_depth=2, max_pages=10),
+        )
+        lex = Lexicon.load(ROOT / "config" / "lexicon.yaml")
+        store = Store(tmp_path / "corpus")
+        frontier = Frontier(tmp_path / "f.sqlite")
+        pipeline = Pipeline(frontier, store, fetcher, lex)
+        adapter = CrawlAdapter(fetcher, spec=spec, lexicon=lex, frontier_db=tmp_path / "u.sqlite")
+
+        st = pipeline.discover(adapter, limit=3)
+
+        # Mecanismo da correcao: o teto vira `Scope.max_documents` (que o
+        # Crawler ja respeita sozinho), nao mais um `break` externo.
+        assert spec.scope.max_documents == 3
+        # Resultado que importa: os 20 documentos (todos com "concept of
+        # operations" no nome do arquivo, todos `strong`) tem que chegar
+        # TODOS ao pipeline — nenhum perdido na fila em memoria.
+        assert st.novos == 20, f"esperava 20 documentos novos, chegaram {st.novos}"
+        frontier.close()
+
+    @respx.mock
+    def test_limit_continua_funcionando_para_fontes_de_api(self, ambiente):
+        """A correcao e' so' para CrawlAdapter — fontes tipo NTRS/ROSA-P (sem
+        fila concorrente) continuam sendo cortadas pelo `--limit` de fora,
+        como sempre."""
+        pipeline, frontier, _ = ambiente
+        recs = [make_rec("ntrs", str(i), f"https://ntrs.nasa.gov/{i}.pdf") for i in range(10)]
+        st = pipeline.discover(FakeAdapter(recs), limit=3)
+        assert st.novos == 3
+        assert st.vistos == 3, "FakeAdapter nao e' CrawlAdapter: o break de fora ainda se aplica"
+
+
+class TestExecucaoFalhaAindaRegistraRun:
+    """Achado real de 2026-08-12: uma excecao no meio de `discover()` deixava
+    `finished_at` nulo pra sempre na tabela `runs` — a execucao ficava
+    invisivel no relatorio, como se ainda estivesse rodando. Reproduzido em
+    producao: 2 execucoes de esa_cosmos travadas por erro de conexao
+    (WinError 10054, cliente morto no meio), `finished_at=None` ate hoje."""
+
+    def test_finish_run_registra_mesmo_com_excecao(self, ambiente):
+        pipeline, frontier, _ = ambiente
+
+        class AdapterQuebra:
+            name = "quebra"
+
+            def discover(self):
+                yield make_rec("quebra", "1", "https://ntrs.nasa.gov/a.pdf")
+                raise RuntimeError("conexao caiu no meio")
+
+        with pytest.raises(RuntimeError):
+            pipeline.discover(AdapterQuebra())
+
+        row = frontier.conn.execute(
+            "SELECT finished_at, stats FROM runs WHERE adapter = 'quebra'"
+        ).fetchone()
+        assert row is not None
+        assert row["finished_at"] is not None, (
+            "a execucao deveria ficar registrada como terminada mesmo apos falhar no meio"
+        )
+        assert '"vistos": 1' in row["stats"], "as estatisticas parciais ate a falha devem ser salvas"

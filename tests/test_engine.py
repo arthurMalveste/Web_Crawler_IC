@@ -20,7 +20,7 @@ from crawler.engine.crawler import Crawler, _melhor_titulo, _nome_do_arquivo
 from crawler.engine.extract import extract_links, extract_metadata, parse_html
 from crawler.engine.linkscorer import LinkScorer
 from crawler.engine.spec import STRATEGY_BFS, STRATEGY_FOCUSED, Scope, SourceSpec
-from crawler.engine.traps import canonicalize, is_trap
+from crawler.engine.traps import canonicalize, is_trap, pagina_redirecionada_suspeita
 from crawler.engine.urlfrontier import KIND_DOCUMENT, KIND_PAGE, URLFrontier
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -133,6 +133,61 @@ class TestExtracaoDeMetadados:
         assert md.title == "Pagina X"
 
 
+class TestWrapperDeDownloadJS:
+    """Achado real do CORDIS (2026-08-12): o modulo de download de
+    documentos da Comissao Europeia (`ec.europa.eu/research/participants/
+    documents/downloadPublic`) entrega o endereco real por
+    `window.location='...'` dentro de um <script> — nao por `<a href>` nem
+    redirecionamento HTTP. Sem isso, `httpx` para na pagina-wrapper e o
+    downloader trata "Documents download module" como se fosse o titulo do
+    documento."""
+
+    WRAPPER_HTML = """<html><head><title>Documents download module</title></head>
+    <body><script>
+    $('document').ready(function(){
+        window.location='https://ec.europa.eu/research/participants/documents/downloadPublic/abc/attachment/def';
+    });
+    </script></body></html>"""
+
+    def test_reconhece_o_redirecionamento_e_ignora_o_titulo_generico(self):
+        md = extract_metadata(
+            parse_html(self.WRAPPER_HTML),
+            "https://ec.europa.eu/research/participants/documents/downloadPublic?documentIds=X&appId=PPGMS",
+        )
+        assert md.pdf_url == "https://ec.europa.eu/research/participants/documents/downloadPublic/abc/attachment/def"
+        assert md.title is None, "o <title> generico do wrapper nao pode virar titulo do documento"
+
+    def test_nao_dispara_fora_do_caminho_conhecido(self):
+        """Escopo estreito de proposito: login walls e paywalls tambem usam
+        `window.location` — nao pode ser tratado como "aqui esta o
+        documento" so' porque o padrao de JS bate."""
+        md = extract_metadata(self._html_generico_com_redirect(), "https://ex.org/login")
+        assert md.pdf_url is None
+
+    @staticmethod
+    def _html_generico_com_redirect():
+        return parse_html(
+            "<html><head><title>Entrar</title></head><body><script>"
+            "window.location='https://ex.org/depois-do-login';"
+            "</script></body></html>"
+        )
+
+    def test_citation_pdf_url_continua_tendo_prioridade(self):
+        """Quando ha' um sinal melhor (citation_pdf_url), o wrapper nem
+        precisa ser considerado."""
+        html = """<html><head>
+            <title>Documents download module</title>
+            <meta name="citation_title" content="Real Title">
+            <meta name="citation_pdf_url" content="/files/real.pdf">
+        </head></html>"""
+        md = extract_metadata(
+            parse_html(html),
+            "https://ec.europa.eu/research/participants/documents/downloadPublic?documentIds=X",
+        )
+        assert md.pdf_url == "https://ec.europa.eu/files/real.pdf"
+        assert md.title == "Real Title"
+
+
 # -------------------------------------------------------------- pontuacao
 
 
@@ -214,6 +269,40 @@ class TestArmadilhas:
         """No Liferay o `?t=` faz parte do endereco; sem ele o servidor recusa."""
         u = "https://www.cosmos.esa.int/documents/1/2/x/uuid?t=1699999"
         assert "t=1699999" in canonicalize(u)
+
+
+class TestRedirecionamentoSuspeito:
+    """Achado real de 2026-08-12: apps.dtic.mil redireciona `/sitemap.xml` e
+    `/sti/citations/` para `/landingpage/maint.html` durante manutencao — HTTP
+    200 no final da cadeia, e o `httpx` segue o redirecionamento sozinho, entao
+    sem esta checagem a pagina de manutencao conta como "visitada com
+    sucesso"."""
+
+    def test_detecta_redirecionamento_para_manutencao(self):
+        motivo = pagina_redirecionada_suspeita(
+            "https://apps.dtic.mil/sitemap.xml",
+            "https://apps.dtic.mil/landingpage/maint.html",
+        )
+        assert motivo and "manutencao" in motivo
+
+    def test_sem_redirecionamento_nao_dispara(self):
+        assert pagina_redirecionada_suspeita(
+            "https://apps.dtic.mil/sti/citations/", "https://apps.dtic.mil/sti/citations/"
+        ) is None
+
+    def test_redirecionamento_inofensivo_nao_dispara(self):
+        """Normalizacoes comuns (barra final, www.) nao podem ser falso positivo."""
+        assert pagina_redirecionada_suspeita(
+            "https://ex.org/pagina", "https://ex.org/pagina/"
+        ) is None
+
+    def test_palavra_legitima_no_caminho_nao_dispara(self):
+        """`is_trap`-style: o padrao e' por NOME de pagina, nao por substring
+        solto — um manual de manutencao de aeronave e' conteudo legitimo, nao
+        uma pagina de erro."""
+        assert pagina_redirecionada_suspeita(
+            "https://www.faa.gov/x", "https://www.faa.gov/aircraft/maintenance/manual.pdf"
+        ) is None
 
 
 # ---------------------------------------------------------------- fronteira
@@ -520,6 +609,79 @@ class TestMotor:
         f2.close()
 
 
+class TestEntregavelViaWrapperDeDownload:
+    """Integra `TestWrapperDeDownloadJS` ao motor inteiro: replica o caso real
+    do CORDIS — uma pagina de projeto linka o entregavel com o TITULO REAL
+    como ancora; o link aponta para o modulo de download, que so' revela o
+    arquivo por `window.location`. O documento emitido tem que carregar o
+    titulo real (da ancora), nao o <title> generico do wrapper."""
+
+    @respx.mock
+    def test_titulo_vem_da_ancora_da_pagina_de_projeto(self, tmp_path, fetcher, lexicon):
+        respx.get("https://ex.org/project/id/1/results").mock(
+            return_value=httpx.Response(
+                200,
+                html='<html><body>'
+                '<a href="https://ex.org/documents/downloadPublic?documentIds=X">'
+                'Concept of Operations for Vertiport Integration (opens in new window)'
+                '</a></body></html>',
+            )
+        )
+        respx.get("https://ex.org/documents/downloadPublic").mock(
+            return_value=httpx.Response(
+                200,
+                html="""<html><head><title>Documents download module</title></head>
+                <body><script>
+                window.location='https://ex.org/documents/downloadPublic/real/attachment/x';
+                </script></body></html>""",
+            )
+        )
+        respx.get("https://ex.org/documents/downloadPublic/real/attachment/x").mock(
+            return_value=httpx.Response(200, content=b"%PDF-")
+        )
+        spec = spec_de_teste(STRATEGY_BFS, max_depth=2)
+        spec.seeds = ["https://ex.org/project/id/1/results"]
+        f = URLFrontier(tmp_path / "u.sqlite", "ex")
+        recs = list(Crawler(spec, fetcher, lexicon, f).crawl())
+
+        assert len(recs) == 1
+        assert recs[0].title == "Concept of Operations for Vertiport Integration (opens in new window)"
+        assert recs[0].candidate_urls == ["https://ex.org/documents/downloadPublic/real/attachment/x"]
+        f.close()
+
+
+class TestPaginaDeManutencaoNaoContaComoSucesso:
+    """Integra `TestRedirecionamentoSuspeito` ao motor: a pagina redirecionada
+    fica SKIPPED com motivo explicito, nao VISITED como se tivesse links de
+    verdade para seguir — e o rastreamento simplesmente para por falta de
+    fronteira, sem nenhum documento, exatamente o padrao observado ao vivo em
+    apps.dtic.mil."""
+
+    @respx.mock
+    def test_redirecionamento_para_manutencao_vira_skipped(self, tmp_path, fetcher, lexicon):
+        # A semente e' guardada canonicalizada (sem barra final — ver
+        # `core/record.py::canonical_url`), entao e' essa forma que de fato
+        # sai na requisicao.
+        respx.get("https://ex.org/sti/citations").mock(
+            return_value=httpx.Response(307, headers={"location": "/landingpage/maint.html"})
+        )
+        respx.get("https://ex.org/landingpage/maint.html").mock(
+            return_value=httpx.Response(200, html="<html><body>Under Maintenance</body></html>")
+        )
+        spec = spec_de_teste(STRATEGY_BFS)
+        spec.seeds = ["https://ex.org/sti/citations/"]
+        f = URLFrontier(tmp_path / "u.sqlite", "ex")
+        recs = list(Crawler(spec, fetcher, lexicon, f).crawl())
+
+        assert recs == []
+        row = f.conn.execute(
+            "SELECT state, error FROM urls WHERE source='ex' AND url='https://ex.org/sti/citations'"
+        ).fetchone()
+        assert row["state"] == "skipped"
+        assert "manutencao" in row["error"]
+        f.close()
+
+
 class TestEmissaoIncremental:
     """Decisao de 2026-08-11: documentos sao entregues assim que descobertos,
     nao so' no fim do rastreamento inteiro. Ver docstring de crawler.py."""
@@ -579,6 +741,45 @@ class TestEmissaoIncremental:
         assert c.stats.paginas_baixadas < 50, (
             "fechar o generator cedo deveria parar o rastreamento, nao so' a "
             f"entrega — visitou {c.stats.paginas_baixadas} paginas depois do close()"
+        )
+        f.close()
+
+
+class TestCachePorPaginaMae:
+    """Achado real de 2026-08-12: `_emitir_pendentes()` rebuscava a mesma
+    pagina-mae uma vez POR DOCUMENTO pendente, sem cache. Uma unica pagina de
+    indice com dezenas/centenas de documentos (visto ao vivo: PSAS, 538+ links
+    de arquivo numa pagina so) virava dezenas/centenas de requisicoes
+    redundantes a mesma URL, ao ritmo (`rate`) do host — minutos ou horas so
+    para escoar um represamento que na pratica tem poucas paginas-mae
+    distintas."""
+
+    @respx.mock
+    def test_no_maximo_uma_busca_por_pagina_mae(self, tmp_path, fetcher, lexicon):
+        pagina_mae = respx.get("https://ex.org/indice/").mock(
+            return_value=httpx.Response(
+                200,
+                html="""<html><head>
+                    <meta name="citation_title" content="Indice de Documentos">
+                </head><body></body></html>""",
+            )
+        )
+        f = URLFrontier(tmp_path / "u.sqlite", "ex")
+        for i in range(5):
+            f.add(
+                f"https://ex.org/files/doc{i}.pdf",
+                depth=1,
+                priority=0.0,
+                kind=KIND_DOCUMENT,
+                anchor=f"Documento {i}",
+                parent="https://ex.org/indice/",
+            )
+        c = Crawler(spec_de_teste(STRATEGY_BFS), fetcher, lexicon, f)
+        recs = list(c._emitir_pendentes())
+
+        assert len(recs) == 5
+        assert pagina_mae.call_count == 1, (
+            f"a pagina-mae deveria ser buscada uma unica vez, nao {pagina_mae.call_count}"
         )
         f.close()
 

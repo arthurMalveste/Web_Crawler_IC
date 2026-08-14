@@ -117,6 +117,22 @@ def test_xml_invalido_nao_quebra(fetcher):
 
 
 @respx.mock
+def test_redirecionamento_para_manutencao_nao_tenta_parsear_como_xml(fetcher):
+    """Achado real de 2026-08-12: apps.dtic.mil redireciona `/sitemap.xml`
+    para `/landingpage/maint.html` durante manutencao — HTTP 200 no final,
+    corpo HTML. Antes desta correcao isso so' aparecia como
+    "sitemap.xml_invalido" generico (o ET.fromstring falhava mesmo, so' sem
+    dizer por que); agora e' detectado explicitamente e nao tenta nem parsear."""
+    respx.get("https://apps.dtic.mil/sitemap.xml").mock(
+        return_value=httpx.Response(307, headers={"location": "/landingpage/maint.html"})
+    )
+    respx.get("https://apps.dtic.mil/landingpage/maint.html").mock(
+        return_value=httpx.Response(200, html="<html><body>Under Maintenance</body></html>")
+    )
+    assert list(iter_sitemap_urls(fetcher, "https://apps.dtic.mil/sitemap.xml")) == []
+
+
+@respx.mock
 def test_descobre_sitemap_declarado_no_robots(fetcher):
     respx.get("https://ex.org/robots.txt").mock(
         return_value=httpx.Response(200, text="User-agent: *\nSitemap: https://ex.org/mapa.xml\n")

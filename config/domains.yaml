@@ -43,6 +43,17 @@ domains:
     concurrency: 2
     respect_robots: true
 
+  # CORE (core.ac.uk) — verificado ao vivo em 2026-08-12: cada chamada leva
+  # 15-60s de resposta (nao e' throttling — x-ratelimit-remaining nao caiu
+  # numa unica chamada; parece ser o tempo real do backend deles), entao o
+  # `rate` abaixo quase nunca chega a ser o fator limitante. concurrency=1
+  # por falta de evidencia de que a API aguenta paralelismo — a cota diaria
+  # documentada varia por tier de registro (100 a 5.000 tokens/dia).
+  api.core.ac.uk:
+    rate: 2.0
+    concurrency: 1
+    respect_robots: true
+
   # Sem limite publicado; OAI-PMH e barato. 1 s/req e conservador.
   rosap.ntl.bts.gov:
     rate: 1.0

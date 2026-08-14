@@ -13,6 +13,7 @@ import httpx
 import pytest
 import respx
 
+from crawler.adapters.core_api import COREAdapter
 from crawler.adapters.ntrs import HARD_CAP, NTRSAdapter
 from crawler.adapters.rosap import RosaPAdapter, _as_oai_datetime
 from crawler.core.fetcher import Config, Fetcher
@@ -273,3 +274,130 @@ class TestRosaPConversao:
             return_value=httpx.Response(200, text=erro)
         )
         assert list(RosaPAdapter(fetcher).discover()) == []
+
+
+# ----------------------------------------------------------------------- CORE
+
+
+@pytest.fixture(scope="module")
+def core_payload():
+    return json.loads((FIXTURES / "core_search.json").read_text(encoding="utf-8"))
+
+
+class TestCOREChaveObrigatoria:
+    def test_sem_chave_falha_na_hora(self, fetcher):
+        """Achado real (2026-08-12): sem `Authorization: Bearer`, `fullText`
+        vem como uma string de aviso, nao como ausencia — e' preferivel travar
+        cedo, com uma mensagem clara, a descobrir isso silenciosamente depois
+        de gastar requisicoes."""
+        with pytest.raises(ValueError, match="CORE_API_KEY"):
+            COREAdapter(fetcher, api_key="", terms=["conops"])
+
+
+class TestCOREConversao:
+    def test_registros_com_arquivo_sao_convertidos(self, fetcher, core_payload):
+        recs = [COREAdapter._to_record(h) for h in core_payload["results"]]
+        # O terceiro registro da fixture nao tem downloadUrl NEM
+        # sourceFulltextUrls (so' metadado, sem arquivo publico) — descartado.
+        recs = [r for r in recs if r is not None]
+        assert len(recs) == 2
+        assert all(r.source == "core" for r in recs)
+
+    def test_registro_sem_arquivo_e_descartado(self, fetcher, core_payload):
+        """Achado real: nem todo resultado do CORE tem arquivo — alguns sao
+        so' metadado de um artigo fechado. Emitir isso daria um
+        `DocumentRecord` com `candidate_urls` vazio, que o harvest nunca
+        consegue baixar."""
+        alvo = next(h for h in core_payload["results"] if h["id"] == 15249161)
+        assert COREAdapter._to_record(alvo) is None
+
+    def test_prefere_download_url_mas_aceita_source_fulltext(self, fetcher, core_payload):
+        sem_download = next(h for h in core_payload["results"] if h["id"] == 7429852)
+        rec = COREAdapter._to_record(sem_download)
+        assert rec is not None
+        assert rec.candidate_urls == ["http://dspace.mit.edu/bitstream/1721.1/83566/1/CHM_STEW_BR_leannow.pdf"]
+
+    def test_fulltext_indisponivel_nao_vira_conteudo(self, fetcher, core_payload):
+        """A API devolve a string literal "Not available for public API
+        users." no lugar do texto quando a chave nao tem acesso — tratar
+        isso como texto de verdade contaminaria a Etapa 2 com uma mensagem
+        de erro em vez do documento."""
+        sem_fulltext = next(h for h in core_payload["results"] if h["id"] == 7429852)
+        rec = COREAdapter._to_record(sem_fulltext)
+        assert rec.raw_metadata["full_text_ja_extraido"] is None
+
+    def test_fulltext_real_e_preservado(self, fetcher, core_payload):
+        com_fulltext = next(h for h in core_payload["results"] if h["id"] == 131932746)
+        rec = COREAdapter._to_record(com_fulltext)
+        assert rec.raw_metadata["full_text_ja_extraido"]
+        assert "airspace" in rec.raw_metadata["full_text_ja_extraido"]
+
+    def test_landing_url_usa_link_display(self, fetcher, core_payload):
+        alvo = next(h for h in core_payload["results"] if h["id"] == 131932746)
+        assert COREAdapter._to_record(alvo).landing_url == "https://core.ac.uk/works/131932746"
+
+    def test_autores_extraidos_da_lista_de_dicts(self, fetcher, core_payload):
+        alvo = next(h for h in core_payload["results"] if h["id"] == 131932746)
+        rec = COREAdapter._to_record(alvo)
+        assert rec.authors == ["Barrado Muxi, Cristina", "Pastor Llorens, Enric"]
+
+
+class TestCOREChamadaReal:
+    @respx.mock
+    def test_envia_bearer_e_pagina_corretamente(self, fetcher, core_payload):
+        """Achado real (2026-08-12): `offset`/`limit` paginam sem o bug do
+        `from` do NTRS — mas o `totalHits` da API NAO e' confiavel (chegou a
+        devolver dezenas de milhoes para uma consulta de titulo bem
+        especifica), entao a paginacao para por PAGINA INCOMPLETA, nunca por
+        `totalHits`."""
+        autorizacoes: list[str] = []
+        offsets: list[int] = []
+
+        def responder(request: httpx.Request) -> httpx.Response:
+            autorizacoes.append(request.headers.get("authorization", ""))
+            q = parse_qs(urlsplit(str(request.url)).query)
+            offset = int(q.get("offset", ["0"])[0])
+            offsets.append(offset)
+            if offset == 0:
+                return httpx.Response(200, json=core_payload)  # pagina cheia (3 de limit=3)
+            return httpx.Response(200, json={"totalHits": 3, "results": []})  # pagina vazia
+
+        respx.get(url__startswith="https://api.core.ac.uk/v3/search/works/").mock(
+            side_effect=responder
+        )
+        adapter = COREAdapter(fetcher, api_key="chave-de-teste", terms=["conops"], page_size=3)
+        recs = list(adapter.discover())
+
+        assert len(recs) == 2  # 3 resultados na fixture, 1 sem arquivo -> descartado
+        assert all(a == "Bearer chave-de-teste" for a in autorizacoes)
+        assert offsets == [0, 3], "deveria ter parado apos a pagina incompleta, sem repetir offset"
+
+    @respx.mock
+    def test_respeita_teto_de_resultados_por_termo(self, fetcher):
+        """`max_resultados_por_termo` e' o freio quando a API sempre devolve
+        pagina cheia (site com volume real muito maior que o que vale a pena
+        pagar em tokens/tempo — cada chamada leva 15-60s de verdade)."""
+        chamadas = {"n": 0}
+
+        def responder(request: httpx.Request) -> httpx.Response:
+            chamadas["n"] += 1
+            q = parse_qs(urlsplit(str(request.url)).query)
+            offset = int(q.get("offset", ["0"])[0])
+            return httpx.Response(
+                200,
+                json={
+                    "totalHits": 999999,
+                    "results": [{"id": offset + i, "title": "x", "downloadUrl": "https://x.org/a.pdf"} for i in range(10)],
+                },
+            )
+
+        respx.get(url__startswith="https://api.core.ac.uk/v3/search/works/").mock(
+            side_effect=responder
+        )
+        adapter = COREAdapter(
+            fetcher, api_key="chave-de-teste", terms=["conops"], page_size=10, max_resultados_por_termo=25
+        )
+        recs = list(adapter.discover())
+
+        assert chamadas["n"] == 3  # offsets 0, 10, 20 — o 4o (30) passaria do teto de 25
+        assert len(recs) == 30

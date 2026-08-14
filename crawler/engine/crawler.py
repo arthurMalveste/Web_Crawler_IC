@@ -46,7 +46,7 @@ from . import sitemap as sitemap_mod
 from .extract import PageMetadata, extract_links, extract_metadata, parse_html
 from .linkscorer import LinkScorer
 from .spec import STRATEGY_FOCUSED, SourceSpec
-from .traps import HostBudget, canonicalize, is_trap
+from .traps import HostBudget, canonicalize, is_trap, pagina_redirecionada_suspeita
 from .urlfrontier import (
     KIND_DOCUMENT,
     KIND_PAGE,
@@ -59,6 +59,19 @@ from .urlfrontier import (
 )
 
 log = structlog.get_logger(__name__)
+
+
+class PaginaSuspeita(Exception):
+    """A URL pedida foi redirecionada para algo que nao e' o conteudo real
+    (pagina de manutencao, erro generico) — HTTP 200 no fim da cadeia de
+    redirecionamentos, mas nao ha' nada do que foi pedido para extrair.
+
+    Distinta de `BlockedByPolicy`: ali alguem RECUSOU a requisicao
+    deliberadamente (blocklist/robots/tamanho); aqui ninguem recusou nada, o
+    servidor so' nao tem o conteudo pedido agora (ex.: manutencao). Tratada do
+    mesmo jeito em `_visitar` — `STATE_SKIPPED` com o motivo — porque nos dois
+    casos a pagina nao tem link nenhum de verdade para extrair.
+    """
 
 
 @dataclass
@@ -364,17 +377,29 @@ class Crawler:
                 self.stats.curva.append((self.stats.paginas_baixadas, self.stats.documentos_encontrados))
 
             if md.pdf_url:
-                score = self.scorer.score(md.pdf_url, anchor=md.title, depth=alvo.depth, is_document=True)
+                # A pagina que declara o PDF geralmente TAMBEM da o melhor
+                # titulo (`md.title` — o caso comum de citation_pdf_url: a
+                # landing page e' especificamente SOBRE aquele documento).
+                # Mas quando `md.title` falta — achado real do CORDIS,
+                # 2026-08-12: a pagina-wrapper de download tem <title>
+                # generico ("Documents download module"), igual em milhares
+                # de arquivos, e por isso deliberadamente descartado por
+                # `extract_metadata` — a ANCORA que levou ate aqui e' a
+                # melhor informacao disponivel (ex.: o nome real do
+                # entregavel, como aparece na pagina do projeto). So' na
+                # falta dos dois cai no rotulo generico.
+                anchor = md.title or alvo.anchor or "(citation_pdf_url)"
+                score = self.scorer.score(md.pdf_url, anchor=anchor, depth=alvo.depth, is_document=True)
                 doc = CrawlURL(
                     url=md.pdf_url, depth=alvo.depth, priority=score.priority + 5.0,
-                    kind=KIND_DOCUMENT, anchor=md.title or "(citation_pdf_url)", parent=alvo.url,
+                    kind=KIND_DOCUMENT, anchor=anchor, parent=alvo.url,
                 )
                 if self.frontier.add(
                     doc.url, depth=doc.depth, priority=doc.priority, kind=KIND_DOCUMENT,
                     anchor=doc.anchor, parent=alvo.url,
                 ):
                     self._emitir_agora(doc, md)
-        except BlockedByPolicy as exc:
+        except (BlockedByPolicy, PaginaSuspeita) as exc:
             self.frontier.mark(alvo.url, STATE_SKIPPED, error=str(exc))
         except Exception as exc:
             with self._stats_lock:
@@ -509,11 +534,26 @@ class Crawler:
         na hora (`_emitir_agora`). Roda de forma sequencial, DEPOIS que todas
         as threads worker ja terminaram — sem concorrencia, sem lock
         necessario para o fetch extra da landing page.
+
+        CACHE POR PAGINA-MAE (achado real de 2026-08-12): uma unica pagina de
+        indice pode ser `parent` de dezenas ou centenas de documentos (visto
+        ao vivo no PSAS: uma pagina, 538+ links de arquivo). Sem cache aqui,
+        cada documento pendente disparava sua PROPRIA busca da mesma
+        pagina-mae — a mesma URL, rebuscada centenas de vezes em sequencia,
+        ao ritmo (`rate`) do host. Medido ao vivo: um represamento antigo de
+        716 documentos do PSAS, todos com poucas paginas-mae distintas, levou
+        minutos so' porque cada um disparava uma busca nova — tempo que, num
+        host mais lento (ex.: FAA, 4s/requisicao), vira facilmente horas, o
+        que e' exatamente o tipo de espera que leva um operador a interromper
+        o processo no meio (perdendo de novo o que ainda nao foi emitido).
         """
+        cache_md: dict[str, PageMetadata | None] = {}
         for doc in self.frontier.documentos_pendentes():
             md = None
             if doc.parent and self._reservadas < self.spec.scope.max_pages:
-                md = self._metadados_da_landing(doc.parent)
+                if doc.parent not in cache_md:
+                    cache_md[doc.parent] = self._metadados_da_landing(doc.parent)
+                md = cache_md[doc.parent]
             registro = self._montar_registro(doc, md)
             self.frontier.mark(doc.url, STATE_EMITTED)
             yield registro
@@ -549,6 +589,16 @@ class Crawler:
         res = self.fetcher.fetch(url, accept="text/html,application/xhtml+xml")
         if not res.ok:
             return None, False
+        # ACHADO REAL (2026-08-12): o httpx segue redirecionamentos sozinho
+        # (`follow_redirects=True`), entao um 307 para uma pagina de
+        # manutencao (apps.dtic.mil, verificado ao vivo) chega aqui como um
+        # 200 normal — sem esta checagem, a pagina conta como "visitada com
+        # sucesso" e o rastreamento simplesmente para (a pagina de manutencao
+        # nao tem link nenhum do conteudo real), sem NENHUM sinal de erro nos
+        # logs ou nas metricas. `res.url` e' a URL FINAL, apos redirecionar.
+        motivo = pagina_redirecionada_suspeita(url, res.url)
+        if motivo:
+            raise PaginaSuspeita(motivo)
         if res.kind not in ("html", "xml", "text"):
             return None, False
         return res.body, False

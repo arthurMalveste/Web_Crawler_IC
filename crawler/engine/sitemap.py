@@ -21,6 +21,8 @@ from xml.etree import ElementTree as ET
 
 import structlog
 
+from .traps import pagina_redirecionada_suspeita
+
 log = structlog.get_logger(__name__)
 
 NS = {"sm": "http://www.sitemaps.org/schemas/sitemap/0.9"}
@@ -108,6 +110,17 @@ def iter_sitemap_urls(
         return
     if not res.ok:
         log.info("sitemap.indisponivel", url=sitemap_url, status=res.status)
+        return
+
+    # ACHADO REAL (2026-08-12): o httpx segue redirecionamentos sozinho, entao
+    # um sitemap redirecionado para uma pagina de manutencao (apps.dtic.mil,
+    # verificado ao vivo) chega aqui como HTTP 200 com corpo HTML — o
+    # `ET.fromstring()` abaixo ia falhar mesmo, mas so' com um
+    # "sitemap.xml_invalido" generico, sem indicar a causa real. Deixa
+    # explicito enquanto ja se sabe.
+    motivo = pagina_redirecionada_suspeita(sitemap_url, res.url)
+    if motivo:
+        log.warning("sitemap.redirecionado_para_pagina_suspeita", url=sitemap_url, motivo=motivo)
         return
 
     corpo = res.body

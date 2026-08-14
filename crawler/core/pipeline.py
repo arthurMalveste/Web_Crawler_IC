@@ -19,6 +19,7 @@ from urllib.parse import urlsplit
 import structlog
 
 from ..adapters.base import BaseAdapter
+from ..adapters.crawl import CrawlAdapter
 from .fetcher import BlockedByPolicy, Fetcher, NotADocument
 from .frontier import (
     STATUS_DISCOVERED,
@@ -104,43 +105,83 @@ class Pipeline:
         self.frontier.start_run(run_id, adapter.name, {"limit": limit, "fase": "discover"})
         st = DiscoveryStats()
 
-        for rec in adapter.discover():
-            st.vistos += 1
+        # ACHADO REAL (2026-08-12): para fontes de CRAWL, `break`-ar este laco
+        # cedo para respeitar `limit` e' perigoso. `adapter.discover()` e' uma
+        # cadeia de generators (`CrawlAdapter.discover()` -> `yield from
+        # Crawler.crawl()`), e o `Crawler` roda VARIAS THREADS em paralelo que
+        # continuam achando e emitindo documentos para uma fila em memoria
+        # (`Crawler._achados`) entre um `yield` e o proximo. Quando o `for`
+        # abaixo da' `break`, o CPython derruba a UNICA referencia ao generator
+        # e fecha ele na hora — lanca `GeneratorExit` exatamente onde
+        # `Crawler.crawl()` estava suspenso. O `finally` de la' para as
+        # threads, mas TUDO que vem depois dele NUNCA roda: nem a varredura
+        # final (`Crawler._emitir_pendentes()`, que entregaria qualquer
+        # documento ainda represado), nem `self.stats = crawler.stats`. Todo
+        # `DocumentRecord` que uma thread ja tinha posto na fila mas o
+        # consumidor ainda nao tinha puxado — cuja URL, alias, JA foi marcada
+        # EMITTED no banco antes de entrar na fila — e' perdido pra sempre:
+        # nunca chega aqui, nunca e' pontuado, e nunca mais sera reprocessado.
+        # Medido ao vivo: TODA execucao de discover ja registrada no projeto
+        # usava `--limit` (a webui sempre repassa quando preenchido), entao
+        # isso nao e' um caso de borda raro.
+        #
+        # As APIs (NTRS/ROSA-P) nao tem essa fila concorrente — fechar o
+        # generator delas cedo so' interrompe a proxima pagina, sem nada em
+        # transito para perder. Por isso a correcao e' so' para `CrawlAdapter`:
+        # em vez de truncar de FORA, delega-se o teto ao proprio
+        # `Scope.max_documents` (ja existe, ja e' respeitado pelo Crawler no
+        # seu proprio fim de execucao normal — ver `_orcamento_esgotado`), e a
+        # fonte para pelo caminho normal, com a varredura final intacta.
+        if limit is not None and isinstance(adapter, CrawlAdapter):
+            adapter.spec.scope.max_documents = limit
+            limit = None
 
-            # Export control antes de qualquer outra coisa: o registro nem entra
-            # na fila. O NTRS expoe ITAR/EAR diretamente no metadado.
-            if rec.export_control:
-                st.export_control += 1
-                self.frontier.add(rec, status=STATUS_EXPORT_CONTROL)
-                self.store.append_reject(
-                    rec, "export_control", detalhe=rec.export_control_reason
-                )
-                continue
+        try:
+            for rec in adapter.discover():
+                st.vistos += 1
 
-            self.lexicon.score_record(rec)
+                # Export control antes de qualquer outra coisa: o registro nem entra
+                # na fila. O NTRS expoe ITAR/EAR diretamente no metadado.
+                if rec.export_control:
+                    st.export_control += 1
+                    self.frontier.add(rec, status=STATUS_EXPORT_CONTROL)
+                    self.store.append_reject(
+                        rec, "export_control", detalhe=rec.export_control_reason
+                    )
+                    continue
 
-            if rec.tier == TIER_NEGATIVE:
-                # Etapa 1 nao julga ConOps: se o lexico ja sinalizou ausencia
-                # de indicio, o candidato nem entra na fila. Guardar negativo
-                # "para treinar um classificador futuro" era emprestar
-                # legitimidade de uma etapa (5) que o proprio projeto colocou
-                # fora de escopo agora (ver docs/handoff) — e o custo era
-                # real: 76% do volume em disco em 2026-08-06 era negativo
-                # nunca usado por nada nesta etapa. Decisao de 2026-08-06.
-                st.por_faixa["descartado"] = st.por_faixa.get("descartado", 0) + 1
-                continue
+                self.lexicon.score_record(rec)
 
-            st.por_faixa[rec.tier] = st.por_faixa.get(rec.tier, 0) + 1
-            if self.frontier.add(rec, status=STATUS_DISCOVERED):
-                st.novos += 1
-            else:
-                st.ja_conhecidos += 1
+                if rec.tier == TIER_NEGATIVE:
+                    # Etapa 1 nao julga ConOps: se o lexico ja sinalizou ausencia
+                    # de indicio, o candidato nem entra na fila. Guardar negativo
+                    # "para treinar um classificador futuro" era emprestar
+                    # legitimidade de uma etapa (5) que o proprio projeto colocou
+                    # fora de escopo agora (ver docs/handoff) — e o custo era
+                    # real: 76% do volume em disco em 2026-08-06 era negativo
+                    # nunca usado por nada nesta etapa. Decisao de 2026-08-06.
+                    st.por_faixa["descartado"] = st.por_faixa.get("descartado", 0) + 1
+                    continue
 
-            if limit and st.novos >= limit:
-                log.info("discover.limite_atingido", adapter=adapter.name, limite=limit)
-                break
+                st.por_faixa[rec.tier] = st.por_faixa.get(rec.tier, 0) + 1
+                if self.frontier.add(rec, status=STATUS_DISCOVERED):
+                    st.novos += 1
+                else:
+                    st.ja_conhecidos += 1
 
-        self.frontier.finish_run(run_id, st.as_dict())
+                if limit and st.novos >= limit:
+                    log.info("discover.limite_atingido", adapter=adapter.name, limite=limit)
+                    break
+        finally:
+            # Mesmo com uma excecao no meio (conexao caindo, servidor
+            # instavel) — grava o que foi possivel. ACHADO REAL (2026-08-12):
+            # sem isso, uma execucao que quebra no meio deixa `finished_at`
+            # nulo pra sempre em `runs` — fica invisivel no relatorio, como se
+            # ainda estivesse rodando. Reproduzido em producao: 2 execucoes de
+            # esa_cosmos travadas por erro de conexao (WinError 10054),
+            # `finished_at=None` ate hoje, sem nenhum sinal de que aconteceu.
+            self.frontier.finish_run(run_id, st.as_dict())
+
         log.info("discover.concluido", adapter=adapter.name, **st.as_dict())
         return st
 

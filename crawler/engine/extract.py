@@ -214,13 +214,64 @@ def extract_metadata(soup: BeautifulSoup, page_url: str) -> PageMetadata:
     if md.is_empty or not md.abstract:
         _do_jsonld(soup, md)
 
-    # 5. Ultimo recurso.
-    if not md.title and soup.title and soup.title.string:
-        md.title = " ".join(soup.title.string.split())[:400]
+    # 4.5 Wrapper de download por redirecionamento JS (achado real do CORDIS,
+    # 2026-08-12 — ver docstring de `_wrapper_de_download_js`). So' entra em
+    # jogo quando nenhum sinal melhor (citation_pdf_url etc.) ja resolveu o
+    # PDF.
+    if not md.pdf_url:
+        alvo_js = _wrapper_de_download_js(soup, page_url)
+        if alvo_js:
+            md.pdf_url = alvo_js
+
+    # 5. Ultimo recurso — MAS NAO para o wrapper de download: seu <title> e'
+    # sempre o mesmo texto generico ("Documents download module"), igual em
+    # milhares de arquivos distintos. Usa-lo aqui daria a todos esses
+    # documentos o mesmo titulo errado; melhor deixar `md.title` vazio e
+    # deixar `_melhor_titulo` (crawler.py) cair para a ancora que levou ate
+    # esta pagina, que e' a informacao real (ex.: o nome do entregavel, tal
+    # como aparece na pagina do projeto no CORDIS).
+    titulo_bruto = soup.title.string if (soup.title and soup.title.string) else None
+    if not md.title and titulo_bruto and titulo_bruto.strip().lower() != _TITULO_WRAPPER_GENERICO:
+        md.title = " ".join(titulo_bruto.split())[:400]
 
     md.authors = [a for a in (x.strip() for x in md.authors) if a][:60]
     md.subjects = _dividir_assuntos(md.subjects)
     return md
+
+
+#: Padrao de redirecionamento por JAVASCRIPT do "Documents download module"
+#: da Comissao Europeia (`ec.europa.eu/research/participants/documents/...` —
+#: usado pelo CORDIS para servir entregaveis, entre outros servicos). O link
+#: publicado (na pagina do projeto, ou no CSV bulk) NUNCA e' o arquivo em si:
+#: e' uma pagina HTML que so' entrega o endereco real via
+#: `window.location='...'` dentro de um <script>, sem `<a href>` nem
+#: redirecionamento HTTP — nenhum downloader HTTP puro segue isso sozinho.
+#: Achado real, verificado ao vivo em 2026-08-12 (as duas requisicoes
+#: precisam compartilhar sessao/cookies; o `Fetcher` ja usa um unico
+#: `httpx.Client` para tudo, entao isso funciona sem tratamento especial).
+_JS_REDIRECT_RE = re.compile(r"window\.location\s*=\s*['\"]([^'\"]+)['\"]")
+
+_TITULO_WRAPPER_GENERICO = "documents download module"
+
+
+def _wrapper_de_download_js(soup: BeautifulSoup, page_url: str) -> str | None:
+    """Reconhece o wrapper de download acima e devolve o endereco real.
+
+    Escopo deliberadamente ESTREITO: so' dispara quando a URL PEDIDA ja' bate
+    no caminho conhecido deste modulo especifico — nao em qualquer pagina com
+    `window.location` por ai'. Login walls, paywalls e paginas de consentimento
+    de cookies tambem usam redirecionamento por JS, e tratar isso como "aqui
+    esta' o documento" fora deste contexto seria um falso positivo real (o
+    mesmo cuidado de `traps.py::pagina_redirecionada_suspeita`, que tambem
+    exige o padrao no CAMINHO, nao so' no conteudo).
+    """
+    if "/documents/downloadpublic" not in urlsplit(page_url).path.lower():
+        return None
+    for script in soup.find_all("script"):
+        m = _JS_REDIRECT_RE.search(script.string or "")
+        if m:
+            return urljoin(page_url, m.group(1))
+    return None
 
 
 def _colher_metas(soup: BeautifulSoup) -> dict[str, list[str]]:

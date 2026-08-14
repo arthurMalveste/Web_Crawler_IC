@@ -267,9 +267,17 @@ class Fetcher:
         last_modified: str | None = None,
         accept: str | None = None,
         expect_document: bool = False,
+        extra_headers: dict[str, str] | None = None,
     ) -> FetchResult:
         """Baixa uma URL aplicando toda a politica. Levanta BlockedByPolicy
-        quando a recusa e deliberada (blocklist/robots/tamanho)."""
+        quando a recusa e deliberada (blocklist/robots/tamanho).
+
+        `extra_headers` existe para adaptadores de API que exigem cabecalho de
+        autenticacao (ex.: CORE, `Authorization: Bearer <chave>`) — nao pode
+        ir no YAML versionado, entao o adaptador le a chave do `.env`
+        (ver `core/env.py`) e passa aqui. Nunca sobrepoe `User-Agent`/`Accept`:
+        e' so' um complemento, aplicado por ultimo.
+        """
         parts = urlsplit(url)
         host = parts.netloc.lower()
 
@@ -288,6 +296,8 @@ class Fetcher:
             headers["If-None-Match"] = etag
         if last_modified:
             headers["If-Modified-Since"] = last_modified
+        if extra_headers:
+            headers.update(extra_headers)
 
         max_bytes = int(policy.max_file_mb * 1024 * 1024)
         delay = policy.backoff_base_s

@@ -225,7 +225,93 @@ Padrões que efetivamente aparecem e que o `traps.py` corta: mesma página servi
 
 ---
 
-## 4. Impacto no cronograma
+## 4. CORDIS — bulk bloqueado por `robots.txt`, resolvido com seeds curadas
+
+**Data da verificação:** 2026-08-12.
+
+O plano inicial era um adaptador *bulk* lendo os dumps CSV mensais de `data.europa.eu`
+(`projectDeliverables`, filtrados por programa prioritário antes do léxico). Verificado ao
+vivo: o desenho funciona — dos ~254 mil entregáveis totais (HORIZON + H2020), o filtro de
+programa reduz para ~26 mil, e o léxico deste projeto reduz para 142 candidatos plausíveis.
+
+**Mas os arquivos bulk moram em `cordis.europa.eu/data/`, e o `robots.txt` do CORDIS tem
+`Disallow: /data/`** — confirmado com o `robotparser` real do projeto, não por leitura
+superficial. Diferente do caso FAA/DTIC (§3-bis — WAF genérico, não política declarada), aqui
+é o próprio `robots.txt` do CORDIS dizendo explicitamente para não automatizar aquele
+caminho. Um "European Commission reuse notice" está anexado ao dataset em
+`data.europa.eu`, mas reuso de dados não é permissão de rastreamento.
+
+**Decisão do projeto:** respeitar o `robots.txt`, abandonar a via bulk. Solução adotada:
+`kind: seeds` com os 86 projetos já identificados (pela mesma investigação acima, antes de
+descartar a via bulk) como tendo entregáveis relevantes — a página de resultados de cada
+projeto (`/project/id/{id}/results`) é permitida pelo `robots.txt`.
+
+### O link do entregável nunca é o arquivo
+
+Achado técnico à parte: o link de cada entregável no CORDIS é uma página HTML ("Documents
+download module", em `ec.europa.eu`) que redireciona por **JAVASCRIPT**
+(`window.location='...'`), não por `<a href>` nem HTTP 30x — nenhum downloader HTTP puro
+segue isso sozinho. As duas requisições (a página-wrapper e o arquivo real) precisam
+compartilhar sessão/cookies; o `Fetcher` já usa um único `httpx.Client` para tudo, então
+funciona sem tratamento especial. O `<title>` do wrapper é sempre o mesmo texto genérico
+("Documents download module") — usá-lo daria a milhares de arquivos distintos o mesmo
+título errado, então `extract_metadata` descarta esse título de propósito e o motor cai para
+a âncora que levou até a página (o nome real do entregável, como aparece na página do
+projeto).
+
+**Validado ao vivo, 100% em conformidade com `robots.txt`:** `discover cordis --max-pages 55`
+encontrou 43 documentos, todos `strong` — títulos reais como "Operational Concept Document
+(OCD) 2023", "PJ19: CONOPS (2019)", "Final Concept of Operations". `harvest_rate: 0,78` — a
+mais alta de qualquer fonte de crawl do projeto.
+
+## 5. CORE (core.ac.uk) — agregador de repositórios acadêmicos
+
+**Data da verificação:** 2026-08-12, contra a API v3 real (`api.core.ac.uk`), com e sem chave.
+
+Diferente das demais fontes: não é um repositório primário nem um portal de projetos — é um
+**agregador** que reindexa milhões de repositórios universitários no mundo inteiro. Isso
+acrescenta uma camada acadêmica (teses, artigos revisados por pares) que nenhuma fonte atual
+cobre. Confirmado ao vivo trazendo ConOps reais de instituições novas: **MIT** (*LAI Concept
+of Operations*), **University of North Texas** (*Transportation System Concept of
+Operations*, *Mined Geologic Disposal System Concept of Operations* — domínio novo, gestão de
+rejeito nuclear/DOE), e o mesmo paper do projeto SESAR/CORUS que já está nas seeds do CORDIS
+(*U-space concept of operations*, grant H2020 RIA-763551) — confirma que a deduplicação por
+SHA-256 já existente vai lidar com a sobreposição entre fontes, como já faz hoje.
+
+### Divergências reais em relação à documentação publicada
+
+1. **`fullText` sem chave** devolve a string literal `"Not available for public API
+   users."` em vez do texto extraído ou de ausência — tratado como ausência
+   (`_FULLTEXT_INDISPONIVEL` em `core_api.py`). **Com chave, o texto real vem** — mesmo
+   achado de alto impacto do NTRS (`fullText` é gerado com Apache PDFBox sobre o PDF do
+   OAI-PMH deles, análogo ao `.txt` do NTRS).
+2. **`totalHits` NÃO é confiável** — ao contrário do `stats.total` do NTRS (validado
+   observando mudança real no número), uma consulta com escopo de título
+   (`title:"concept of operations"`) devolveu `totalHits` na casa das dezenas de milhões,
+   claramente contando ocorrências em texto completo, não registros que batem a frase. Os
+   RESULTADOS retornados, porém, são relevantes e bem ordenados. Consequência prática: o
+   adaptador pagina por `offset`/`limit` até um teto configurável
+   (`max_resultados_por_termo`), nunca até esgotar `totalHits`.
+3. **`offset`/`limit` paginam corretamente** (confirmado: offset=0 e offset=5 devolvem
+   páginas distintas) — ao contrário do bug real do NTRS com o parâmetro `from` sendo
+   ignorado, aqui não há essa armadilha.
+4. **Nem todo resultado tem arquivo**: `downloadUrl` e `sourceFulltextUrls` podem vir os
+   dois vazios (registro só de metadado, artigo fechado sem full text público indexado) —
+   descartado antes de emitir.
+5. **Latência real: 15 a 60 segundos por chamada**, mesmo em consultas simples, sem relação
+   aparente com throttling (o cabeçalho `x-ratelimit-remaining` não caiu após uma única
+   chamada — parece ser o tempo de resposta normal do backend deles, não limitação de taxa).
+   O orçamento de tempo de uma `discover core` precisa contar com isso.
+6. **Cota por tier de registro**, conforme a documentação pública: sem chave, 100
+   tokens/dia (10/min); pessoal registrado, 1.000 tokens/dia (25/min); acadêmico, 5.000
+   tokens/dia (10/min). O cabeçalho real observado numa chamada autenticada foi
+   `x-ratelimit-limit: 150` — não bate exatamente com os números documentados, então vale
+   monitorar os cabeçalhos em vez de confiar cegamente no texto da documentação (mesma
+   lição do NTRS, item 1.2 acima).
+7. **`robots.txt`** de `core.ac.uk`/`api.core.ac.uk` usa o formato novo de "content
+   signals" (não `Disallow` tradicional) — sem restrição a `api.core.ac.uk`.
+
+## 6. Impacto no cronograma
 
 | Item do plano | Situação |
 |---|---|
