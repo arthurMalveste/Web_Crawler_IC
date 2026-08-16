@@ -1,0 +1,34 @@
+{
+  "/government/publications/medical-operating-concept": {
+    "content_id": "e1c223a7-9245-40b9-9788-a44945895537",
+    "title": "Medical Operating Concept",
+    "description": "The Medical Operating Concept considers medical challenges and proposes ways to optimise medical operational capability out to 2030. ",
+    "document_type": "guidance",
+    "first_published_at": "2022-11-23T00:00:00+00:00",
+    "details": {
+      "attachments": [
+        {
+          "title": "Medical Operating Concept (First Edition)",
+          "content_type": "application/pdf",
+          "url": "https://assets.publishing.service.gov.uk/media/63c55bead3bf7f58088d20e5/20230109-Medical_Operating_Concept.pdf"
+        }
+      ]
+    },
+    "links": {
+      "organisations": [{"title": "Ministry of Defence"}]
+    }
+  },
+  "/government/news/joint-forces-command-operational-concept-demonstrator-flies-for-over-25-days": {
+    "content_id": "7c9a2f10-0000-4000-8000-000000000001",
+    "title": "Joint Forces Command: Operational Concept Demonstrator flies for over 25 days",
+    "description": "News story about a flight demonstration.",
+    "document_type": "news_story",
+    "first_published_at": "2018-05-01T00:00:00+00:00",
+    "details": {
+      "attachments": []
+    },
+    "links": {
+      "organisations": [{"title": "Ministry of Defence"}]
+    }
+  }
+}

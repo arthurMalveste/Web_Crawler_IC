@@ -1,0 +1,19 @@
+{
+  "total": 62,
+  "results": [
+    {
+      "title": "Medical Operating Concept",
+      "description": "The Medical Operating Concept considers medical challenges and proposes ways to optimise medical operational capability out to 2030. ",
+      "format": "guidance",
+      "link": "/government/publications/medical-operating-concept",
+      "organisations": [{"title": "Ministry of Defence"}]
+    },
+    {
+      "title": "Joint Forces Command: Operational Concept Demonstrator flies for over 25 days",
+      "description": "News story about a flight demonstration.",
+      "format": "news_story",
+      "link": "/government/news/joint-forces-command-operational-concept-demonstrator-flies-for-over-25-days",
+      "organisations": [{"title": "Ministry of Defence"}]
+    }
+  ]
+}

@@ -54,6 +54,21 @@ domains:
     concurrency: 1
     respect_robots: true
 
+  # GOV.UK Search/Content API — verificado ao vivo em 2026-08-14: sem limite
+  # publicado, latencia real ~2s (busca) / <1s (conteudo). `robots.txt` so
+  # bloqueia `/search/all*` (busca humana); `/api/` esta livre.
+  www.gov.uk:
+    rate: 1.0
+    concurrency: 2
+    respect_robots: true
+
+  # CDN de anexos do GOV.UK, host separado da API — sem `robots.txt` (404),
+  # serve o PDF direto.
+  assets.publishing.service.gov.uk:
+    rate: 1.0
+    concurrency: 2
+    respect_robots: true
+
   # Sem limite publicado; OAI-PMH e barato. 1 s/req e conservador.
   rosap.ntl.bts.gov:
     rate: 1.0

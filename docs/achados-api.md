@@ -311,7 +311,156 @@ SHA-256 já existente vai lidar com a sobreposição entre fontes, como já faz 
 7. **`robots.txt`** de `core.ac.uk`/`api.core.ac.uk` usa o formato novo de "content
    signals" (não `Disallow` tradicional) — sem restrição a `api.core.ac.uk`.
 
-## 6. Impacto no cronograma
+## 6. BASE (base-search.net) — investigado e rejeitado por `robots.txt`
+
+**Data da verificação:** 2026-08-14, ao vivo contra `api.base-search.net` e
+`www.base-search.net` (não por leitura de documentação).
+
+Motivação: mesma categoria do CORE (§5) — agregador acadêmico, mas de escala ainda maior
+(BASE indexa mais de 400 milhões de documentos via OAI-PMH, contra os milhões do CORE).
+Avaliado como fonte candidata a seguir o CORE.
+
+**`api.base-search.net/robots.txt` bloqueia tudo, para todo agente:**
+
+```
+User-agent: *
+Disallow: /
+```
+
+Diferente do CORDIS (§4), onde o `Disallow: /data/` deixava outros caminhos livres e permitiu
+a solução de seeds, aqui **não sobra caminho nenhum** dentro da API para respeitar o
+`robots.txt` e ainda assim coletar algo. O `Fetcher` do projeto (`crawler/core/fetcher.py`)
+consulta e aplica `robots.txt` para **qualquer** adaptador — de API ou de crawl —, então uma
+implementação real bateria `BlockedByPolicy` em toda chamada, a menos que o projeto decidisse
+deliberadamente configurar `respect_robots: False` para esse domínio.
+
+**Agravante:** `www.base-search.net/robots.txt` (o site principal, não a API) nomeia bots de
+IA explicitamente na lista de agentes banidos — `anthropic-ai`, `ClaudeBot`, `Claude-Web`,
+junto de `GPTBot`, `PerplexityBot`, `CCBot` etc. — e fecha com um aviso jurídico explícito
+contra coleta automatizada sem permissão expressa. Não é a mesma política que rege a API, mas
+reforça o sinal de intenção da instituição quanto a automação por agentes de IA.
+
+**Acesso à API também é mais restrito que o CORE:** sem chave e com chave fictícia, ambos
+devolveram `{"error": "Access denied for IP address ... and user agent ..."}` — sugere
+whitelist de IP além de (ou em vez de) uma chave tipo `Bearer`. A documentação pública
+confirma um processo de aprovação manual (formulário + análise de caso de uso + e-mail em
+alguns dias), diferente do registro imediato do CORE.
+
+**Decisão (perguntada a você via `AskUserQuestion`, mesmo padrão do CORDIS):** não
+implementar. BASE fica documentado como fonte investigada e descartada por política declarada
+da instituição — não por limitação técnica. Reavaliar exigiria (a) aprovação formal de acesso
+pelo BASE **e** (b) uma decisão explícita e separada sobre configurar `respect_robots: False`
+para `api.base-search.net`, já que a aprovação de uso não muda o que o `robots.txt` declara.
+
+## 7. ASC-CSA (Canadian Space Agency) — investigado e rejeitado por baixo sinal/volume
+
+**Data da verificação:** 2026-08-14, ao vivo contra `www.asc-csa.gc.ca` (sitemaps reais e
+amostra de páginas), duas rodadas de investigação na mesma sessão.
+
+### 7.1 `/eng/publications/` — conteúdo administrativo, não de engenharia
+
+`robots.txt` é permissivo (só `Disallow: /longdesc/`), e o sitemap dedicado
+(`sitemap-site-publications.xml`) lista 598 URLs — nada bloqueado tecnicamente. Mas a
+amostragem de URLs e páginas reais mostrou que a seção é majoritariamente **relatórios
+corporativos/administrativos**: relatórios ao Parlamento, relatórios financeiros trimestrais,
+auditoria e avaliação, "State of the Canadian Space Sector". Zero ocorrências de
+"concept"/"operations"/"conops" nas 598 URLs do sitemap. Mesmo padrão de risco do FAA (§3-bis,
+item 6) — tecnicamente crawlável, mas sem o tipo de conteúdo que o léxico busca.
+
+### 7.2 `funding-programs/funding-opportunities/ao/` — sinal melhor, ainda insuficiente
+
+Subdiretório de editais (*Announcements of Opportunity*) pareceu mais promissor por conter
+especificações técnicas de missão embutidas no HTML. Escaneadas as 180 páginas do subdiretório
+(via sitemap real) por links a PDF:
+
+- **53 PDFs únicos** de 150/180 páginas amostradas (~0,35 PDF/página) — densidade baixa.
+- Maioria é **boilerplate repetido**: o mesmo
+  `Guidelines_for_the_use_of_protected_document_submission_system.pdf` aparece em mais de 40
+  páginas — instrução de submissão, não documento técnico.
+- Restante: EULAs de licenciamento (RADARSAT-2), relatórios de prioridades científicas,
+  roadmaps, manuais do NEOSSAT — nenhum documento de concepção de missão.
+- **Nenhum arquivo com "conops"/"concept of operations"/"opscon" no nome** em toda a amostra.
+- **Único achado tecnicamente relevante**: `AD-01 CSA-WFS-RD-0002_Rev_IR_-_Mission_Requirements
+  _Document.pdf` (projeto WildFireSat) — mas hospedado em `ftp://ftp.asc-csa.gc.ca/...`. O
+  `Fetcher` do projeto usa `httpx`, que **não suporta o esquema `ftp://`** — inalcançável sem
+  trabalho novo de suporte a FTP, para um retorno de ~1 documento que nem é um ConOps de fato
+  (é um *Requirements Document*).
+- Vários PDFs citados nas páginas de AO são externos (NASA NTRS, ESA, universidades,
+  CASCA) — bibliografia do edital, não documentos autorais da CSA.
+
+**Decisão (perguntada a você via `AskUserQuestion`, duas vezes — uma por subseção):** não
+implementar nenhuma das duas. ASC-CSA fica documentado como fonte investigada e descartada por
+volume/sinal insuficiente — não por bloqueio de política (diferente do CORDIS/BASE, §4 e §6).
+Reavaliar exigiria ou (a) suporte a `ftp://` no `Fetcher`, ou (b) uma varredura mais profunda
+do FTP público da CSA (`ftp.asc-csa.gc.ca`, pastas por projeto: `ExP`, `TRP`, `SESS`,
+`OpenData_DonneesOuvertes`) para saber se há mais material lá do que o linkado nas páginas
+HTML — nenhum dos dois foi feito nesta rodada.
+
+## 8. GOV.UK (Ministry of Defence) — implementado, mesmo padrão do CORE
+
+**Data da verificação:** 2026-08-14, ao vivo contra `www.gov.uk`. Motivação: você trouxe a URL
+de busca humana do GOV.UK filtrada por `organisations[]=ministry-of-defence` como candidata.
+
+### `robots.txt` bloqueia a busca humana, não a API
+
+```
+Disallow: /*/print$
+Disallow: /search/all*
+```
+
+A URL que você trouxe bate exatamente `Disallow: /search/all*`. Mas o **Search API**
+(`www.gov.uk/api/search.json`) e o **Content API** (`www.gov.uk/api/content/<path>`) são
+caminhos separados, sem nenhuma entrada em `robots.txt` — mesmo padrão "UI bloqueada, API
+livre" já visto no CORE e no NTRS. Sem chave, sem cadastro, testado ao vivo de imediato.
+
+### Desenho: duas chamadas por documento, não uma
+
+Diferente do CORE (uma chamada devolve tudo), o `search.json` não inclui anexos — só
+`title`/`description`/`link`. Os PDFs só aparecem em `details.attachments[].url` do
+`content.json`. `GovUKAdapter._to_record` busca o conteúdo por `link` e descarta
+(`return None`) se não houver anexo `application/pdf` — confirmado ao vivo que tipos como
+`speech`/`news_story`/`oral_statement` não têm `details.attachments` (mesma regra "nem todo
+resultado tem arquivo" do CORE, §5 item 4).
+
+Para não pagar essa segunda chamada em duplicidade, o adaptador deduplica pelo `link` **entre
+termos**, dentro do mesmo `discover()` — o mesmo documento pode bater buscas por frases
+diferentes do léxico (achado ao vivo: "Air Operating Concept" aparece tanto em buscas por
+"operational concept" quanto por "operating concept").
+
+### Latência real — ordens de grandeza melhor que o CORE
+
+Medido ao vivo: **~2s por busca** (até 1500 resultados/chamada, bem acima de qualquer volume
+visto neste projeto), **<1s por chamada de conteúdo**. Paginação por `start`/`count`
+confirmada correta (páginas disjuntas) — sem o bug do `from` do NTRS nem a inflação de
+`totalHits` do CORE.
+
+### Volume e qualidade do conteúdo
+
+Termos do léxico, filtrados por `ministry-of-defence`: `"operational concept"`/`"operations
+concept"` → 62, `"joint doctrine publication"` → 28, `"JDP"` → 43, `"joint concept note"` → 14.
+O GOV.UK mantém coleções curadas próprias — *Joint Doctrine Publications* (17 documentos, ex.
+"UK Defence Doctrine (JDP 0-01)", "UK Space Power (JDP 0-40)") e *Strategic and Joint
+Capability Concepts/JCN* (inclui "Air Operating Concept", "Maritime Operating Concept",
+"Medical Operating Concept", "Integrated Operating Concept") — descobertas naturalmente pela
+busca por termo, sem precisar de curadoria manual tipo CORDIS.
+
+### Achado de léxico: "Operating Concept", não "Operational Concept"
+
+O MOD britânico nomeia esse tipo de documento **"Operating Concept"** — frase que não estava
+em `config/lexicon.yaml` (só havia "operational concept"/"operations concept"). Sem o termo,
+títulos como "Air Operating Concept (AirOpC)" não pontuavam `strong`. Adicionado a
+`strong_terms` (e a `TERMOS_LEXICO_FORTE` em `cli.py`, a lista usada como consulta pelas três
+fontes de busca textual) — achado válido independente desta fonte, mas encontrado por causa
+dela.
+
+### Validado ao vivo
+
+`discover govuk --limit 5`: 19 candidatos vistos, 5 relevantes (4 `strong` + 1 `weak`), 0
+descartados por `export_control` (conteúdo público por definição — licença fixa `Crown
+copyright — Open Government Licence v3.0`, não varia por documento). `discover-all --only
+govuk --limit 3` confirma a fiação sem quebrar `--only`.
+
+## 9. Impacto no cronograma
 
 | Item do plano | Situação |
 |---|---|

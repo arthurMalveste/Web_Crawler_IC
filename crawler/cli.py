@@ -27,6 +27,7 @@ import structlog
 
 from .adapters.core_api import COREAdapter
 from .adapters.crawl import CrawlAdapter
+from .adapters.govuk import GovUKAdapter
 from .adapters.ntrs import NTRSAdapter, NTRSRedistributions
 from .adapters.rosap import RosaPAdapter
 from .core.fetcher import Config, Fetcher
@@ -44,13 +45,14 @@ CONFIG_DIR = ROOT / "config"
 SOURCES_DIR = CONFIG_DIR / "sources"
 
 #: Termos de sinal forte do lexico, usados como consulta pelas fontes de API
-#: que aceitam busca textual (NTRS, CORE) — e o mesmo vocabulario que decide
-#: a faixa, entao consulta e filtro nao divergem.
+#: que aceitam busca textual (NTRS, CORE, GOV.UK) — e o mesmo vocabulario que
+#: decide a faixa, entao consulta e filtro nao divergem.
 TERMOS_LEXICO_FORTE = [
     "concept of operations",
     "conops",
     "operational concept",
     "operations concept",
+    "operating concept",
     "concept of employment",
     "mission operations concept",
 ]
@@ -111,6 +113,9 @@ def make_adapter(name: str, fetcher, lexicon: Lexicon, args: argparse.Namespace)
         # sempre constroi `Config` primeiro (ver `core/env.py::carregar_dotenv`).
         api_key = os.environ.get("CORE_API_KEY", "")
         return COREAdapter(fetcher, api_key=api_key, terms=terms)
+    if name == "govuk":
+        terms = args.terms or TERMOS_LEXICO_FORTE
+        return GovUKAdapter(fetcher, terms=terms)
 
     # Qualquer outra fonte e resolvida por SourceSpec — adicionar um
     # repositorio novo custa um YAML, nao um modulo Python.
@@ -206,7 +211,7 @@ def cmd_discover_all(args: argparse.Namespace) -> int:
     `render=True`, ESA EOF) funciona normalmente rodando fora da thread
     principal neste ambiente.
     """
-    fontes = ["ntrs", "rosap", "core"] + (
+    fontes = ["ntrs", "rosap", "core", "govuk"] + (
         sorted(p.stem for p in SOURCES_DIR.glob("*.yaml")) if SOURCES_DIR.exists() else []
     )
     if args.only:
@@ -372,7 +377,8 @@ def main(argv: list[str] | None = None) -> int:
     fontes = sorted(p.stem for p in SOURCES_DIR.glob("*.yaml")) if SOURCES_DIR.exists() else []
     d = sub.add_parser(
         "discover",
-        help="descobrir candidatos (so metadados). Fontes: ntrs, rosap, core, " + ", ".join(fontes),
+        help="descobrir candidatos (so metadados). Fontes: ntrs, rosap, core, govuk, "
+        + ", ".join(fontes),
     )
     d.add_argument("adapter")
     d.add_argument("--limit", type=int)

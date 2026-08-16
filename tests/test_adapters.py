@@ -14,6 +14,7 @@ import pytest
 import respx
 
 from crawler.adapters.core_api import COREAdapter
+from crawler.adapters.govuk import GovUKAdapter
 from crawler.adapters.ntrs import HARD_CAP, NTRSAdapter
 from crawler.adapters.rosap import RosaPAdapter, _as_oai_datetime
 from crawler.core.fetcher import Config, Fetcher
@@ -401,3 +402,146 @@ class TestCOREChamadaReal:
 
         assert chamadas["n"] == 3  # offsets 0, 10, 20 — o 4o (30) passaria do teto de 25
         assert len(recs) == 30
+
+
+# --------------------------------------------------------------------- GOVUK
+
+
+@pytest.fixture(scope="module")
+def govuk_search_payload():
+    return json.loads((FIXTURES / "govuk_search.json").read_text(encoding="utf-8"))
+
+
+@pytest.fixture(scope="module")
+def govuk_content_payload():
+    return json.loads((FIXTURES / "govuk_content.json").read_text(encoding="utf-8"))
+
+
+class FetcherFalsoGovUK:
+    """Fetcher minimo que resolve `/api/content/<path>` a partir da fixture,
+    sem rede — usado nos testes de `_to_record` isolados (a paginacao/dedup
+    real e' testada a parte, via `respx`, contra o `Fetcher` de verdade)."""
+
+    def __init__(self, content_payload: dict, chamadas: list[str] | None = None):
+        self._content = content_payload
+        self.chamadas = chamadas if chamadas is not None else []
+
+    def get_json(self, url: str):
+        self.chamadas.append(url)
+        base_path = url.split("/api/content", 1)[1]
+        return self._content[base_path]
+
+
+class TestGovUKConversao:
+    def test_documento_com_anexo_e_convertido(self, govuk_search_payload, govuk_content_payload):
+        hit = govuk_search_payload["results"][0]
+        rec = GovUKAdapter._to_record(hit, FetcherFalsoGovUK(govuk_content_payload))
+        assert rec is not None
+        assert rec.source == "govuk"
+        assert rec.source_id == "e1c223a7-9245-40b9-9788-a44945895537"
+        assert rec.title == "Medical Operating Concept"
+        assert rec.candidate_urls == [
+            "https://assets.publishing.service.gov.uk/media/63c55bead3bf7f58088d20e5/20230109-Medical_Operating_Concept.pdf"
+        ]
+        assert (
+            rec.landing_url
+            == "https://www.gov.uk/government/publications/medical-operating-concept"
+        )
+        assert rec.organization == "Ministry of Defence"
+        assert rec.rights == "Crown copyright — Open Government Licence v3.0"
+        assert rec.export_control is False
+
+    def test_documento_sem_anexo_e_descartado(self, govuk_search_payload, govuk_content_payload):
+        """Achado real (2026-08-14): speech/news_story/oral_statement nao tem
+        `details.attachments` — sem PDF, nada para o harvest baixar."""
+        hit = govuk_search_payload["results"][1]
+        rec = GovUKAdapter._to_record(hit, FetcherFalsoGovUK(govuk_content_payload))
+        assert rec is None
+
+
+class TestGovUKChamadaReal:
+    @respx.mock
+    def test_pagina_ate_incompleta_e_descarta_sem_anexo(self, fetcher, govuk_content_payload):
+        starts: list[int] = []
+
+        def responder_busca(request: httpx.Request) -> httpx.Response:
+            q = parse_qs(urlsplit(str(request.url)).query)
+            start = int(q.get("start", ["0"])[0])
+            starts.append(start)
+            if start == 0:
+                return httpx.Response(
+                    200,
+                    json={
+                        "results": [
+                            {
+                                "title": "Medical Operating Concept",
+                                "link": "/government/publications/medical-operating-concept",
+                            },
+                            {
+                                "title": "Joint Forces Command demonstrator flight",
+                                "link": "/government/news/joint-forces-command-operational-concept-demonstrator-flies-for-over-25-days",
+                            },
+                        ]
+                    },
+                )
+            return httpx.Response(200, json={"results": []})
+
+        def responder_content(request: httpx.Request) -> httpx.Response:
+            base_path = request.url.path.split("/api/content", 1)[1]
+            return httpx.Response(200, json=govuk_content_payload[base_path])
+
+        respx.get(url__startswith="https://www.gov.uk/api/search.json").mock(
+            side_effect=responder_busca
+        )
+        respx.get(url__startswith="https://www.gov.uk/api/content/").mock(
+            side_effect=responder_content
+        )
+
+        adapter = GovUKAdapter(fetcher, terms=["operating concept"], page_size=2)
+        recs = list(adapter.discover())
+
+        assert len(recs) == 1  # o segundo hit (news_story) nao tem anexo -> descartado
+        assert starts == [0, 2], "pagina 0 veio cheia (2/2); precisa checar a proxima ate' vir vazia"
+
+    @respx.mock
+    def test_dedup_entre_termos_evita_chamada_de_conteudo_repetida(
+        self, fetcher, govuk_content_payload
+    ):
+        """Achado do design (2026-08-14): o mesmo documento pode bater buscas
+        por termos diferentes (ex. "operating concept" e "operational
+        concept"). Sem dedup pelo `link`, cada acerto repetido pagaria de
+        novo a chamada de conteudo — desperdicio de rede sem ganho nenhum."""
+        chamadas_content: list[str] = []
+
+        def responder_busca(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(
+                200,
+                json={
+                    "results": [
+                        {
+                            "title": "Medical Operating Concept",
+                            "link": "/government/publications/medical-operating-concept",
+                        }
+                    ]
+                },
+            )
+
+        def responder_content(request: httpx.Request) -> httpx.Response:
+            base_path = request.url.path.split("/api/content", 1)[1]
+            chamadas_content.append(base_path)
+            return httpx.Response(200, json=govuk_content_payload[base_path])
+
+        respx.get(url__startswith="https://www.gov.uk/api/search.json").mock(
+            side_effect=responder_busca
+        )
+        respx.get(url__startswith="https://www.gov.uk/api/content/").mock(
+            side_effect=responder_content
+        )
+
+        adapter = GovUKAdapter(
+            fetcher, terms=["operating concept", "operational concept"], page_size=10
+        )
+        recs = list(adapter.discover())
+
+        assert len(recs) == 1
+        assert len(chamadas_content) == 1, "o mesmo link batido por dois termos so' deveria buscar conteudo uma vez"
