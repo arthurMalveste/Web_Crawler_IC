@@ -23,12 +23,21 @@ Achados reais, verificados ao vivo em 2026-08-14 contra `www.gov.uk` (ver
   5. Licenca e' sempre a mesma (Open Government Licence) — nao varia por
      documento, entao `rights` e' uma string fixa em vez de um campo lido da
      API.
+
+Achado de eficiencia (2026-08-16): `www.gov.uk` libera `concurrency: 2`
+(`config/domains.yaml`), mas o `content.json` — a UNICA chamada por documento
+que esta fonte precisa fazer, ao contrario de NTRS/ROSAP/CORE, que pegam tudo
+num lote — era buscado um de cada vez. `discover()` agora manda essas
+chamadas para uma `ThreadPoolExecutor` do tamanho da concorrencia liberada;
+`Fetcher.fetch()` ja limita chamadas concorrentes ao MESMO host via semaforo
+proprio, entao abrir mais threads aqui nunca estoura o teto do servidor.
 """
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Iterator
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlsplit
 
 import structlog
 
@@ -71,15 +80,21 @@ class GovUKAdapter(BaseAdapter):
         self._vistos: set[str] = set()
 
     def discover(self) -> Iterator[DocumentRecord]:
-        for term in self.terms:
-            yield from self._walk(term)
+        # UMA pool para o adaptador inteiro (nao uma por termo/pagina): o
+        # teto real e' o semaforo do host dentro do `Fetcher`, entao reusar a
+        # mesma pool entre termos evita recriar threads a toa.
+        host = urlsplit(CONTENT).netloc
+        n_workers = max(1, min(self.fetcher.policy_for(host).concurrency, 32))
+        with ThreadPoolExecutor(max_workers=n_workers, thread_name_prefix="govuk-content") as pool:
+            for term in self.terms:
+                yield from self._walk(term, pool)
 
     def _search(self, term: str, start: int) -> dict[str, Any]:
         params = [("q", f'"{term}"'), ("start", start), ("count", self.page_size)]
         params += [("filter_organisations", org) for org in self.organisations]
         return self.fetcher.get_json(f"{SEARCH}?{urlencode(params)}")
 
-    def _walk(self, term: str) -> Iterator[DocumentRecord]:
+    def _walk(self, term: str, pool: ThreadPoolExecutor) -> Iterator[DocumentRecord]:
         start = 0
         colhidos = 0
         emitidos = 0
@@ -88,12 +103,19 @@ class GovUKAdapter(BaseAdapter):
             hits = data.get("results") or []
             if not hits:
                 break
+            # Dedupe pelo `link` primeiro (barato, sem rede) — so os hits
+            # realmente novos desta pagina pagam a chamada de `content.json`,
+            # e pagam em paralelo, ate o limite da pool.
+            novos = []
             for hit in hits:
                 link = hit.get("link")
                 if not link or link in self._vistos:
                     continue
                 self._vistos.add(link)
-                rec = self._to_record(hit, self.fetcher)
+                novos.append(hit)
+            futuros = [pool.submit(self._to_record, hit, self.fetcher) for hit in novos]
+            for fut in as_completed(futuros):
+                rec = fut.result()
                 if rec is not None:
                     emitidos += 1
                     yield rec

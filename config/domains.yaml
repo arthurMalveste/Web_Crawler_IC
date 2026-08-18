@@ -57,8 +57,21 @@ domains:
   # GOV.UK Search/Content API — verificado ao vivo em 2026-08-14: sem limite
   # publicado, latencia real ~2s (busca) / <1s (conteudo). `robots.txt` so
   # bloqueia `/search/all*` (busca humana); `/api/` esta livre.
+  #
+  # EXPERIMENTO 2026-08-16: `rate` reduzido de 1.0 para 0.5s, a pedido do
+  # operador — mesmo padrao do experimento de concurrency de 2026-08-05.
+  # Motivo medido: com rate=1.0 e concurrency=2, o `_throttle` do Fetcher
+  # (fetcher.py, roda DENTRO do semaforo) limitava o INICIO de cada
+  # requisicao a 1/segundo independente da concorrencia liberada — como as
+  # chamadas de `content.json` respondem em <1s, a concorrencia nunca chegava
+  # a ser o fator limitante de verdade. `discover govuk --terms "operational
+  # concept"` (62 documentos) levou 61s sequencial E 64s com pool de 2
+  # workers sob rate=1.0 — ganho zero, confirmado ao vivo antes desta
+  # mudanca. RISCO: sem limite publicado pela API, 0.5s e' uma reducao
+  # moderada, nao agressiva; se aparecer 429/403 novo, volte para 1.0
+  # primeiro.
   www.gov.uk:
-    rate: 1.0
+    rate: 0.5
     concurrency: 2
     respect_robots: true
 

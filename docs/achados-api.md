@@ -460,7 +460,64 @@ descartados por `export_control` (conteúdo público por definição — licenç
 copyright — Open Government Licence v3.0`, não varia por documento). `discover-all --only
 govuk --limit 3` confirma a fiação sem quebrar `--only`.
 
-## 9. Impacto no cronograma
+## 9. Eficiência do `discover`: threads sub-utilizadas e o limite real de `rate`
+
+**Data da verificação:** 2026-08-16. Motivação: você observou `discover-all` (ntrs, rosap,
+core, govuk, cordis) parecendo travado no CORDIS, com as outras fontes "esperando".
+
+### Auditoria: concorrência configurada vs. usada de fato
+
+Cruzando o código de cada `discover()` com a `concurrency` que `config/domains.yaml` já
+autorizava para aquele host:
+
+| Fonte | `concurrency` liberada | Threads usadas antes | Motivo |
+|---|---|---|---|
+| NTRS | 2 | 1 | `discover()` andava 7 termos em sequência — nenhum estado compartilhado entre eles, sub-utilização real. |
+| ROSAP | 2 | 1 | **Não é sub-utilização**: harvest OAI-PMH único por `resumptionToken`, protocolo proíbe paralelizar páginas de uma mesma sequência. |
+| CORE | 1 | 1 | Já correto — `concurrency: 1` é decisão deliberada (§5, item 6), sem ganho possível. |
+| GOV.UK | 2 | 1 | Pior caso: além de não paralelizar termos, é a única fonte com uma chamada de rede *por documento* (`content.json`), sequencial. |
+| CORDIS (referência) | 3 | 3 | Já correto — `CrawlAdapter` já abre threads próprias. A demora de 36 min nessa fonte é orçamento (1076 páginas × `rate=2s`/3), não threads ociosas. |
+
+### Fix aplicado 1 — `NTRSAdapter`: termos em paralelo — **funcionou como previsto**
+
+`discover()` agora roda os termos numa `ThreadPoolExecutor` de tamanho
+`min(policy_for(host).concurrency, 32)`. **Validado ao vivo**: dois termos independentes (395
+e 102 resultados reais) terminaram com 2s de diferença um do outro, total de parede 10s —
+evidência direta de execução concorrente (sequencial seria a soma dos dois tempos).
+
+### Fix aplicado 2 — `GovUKAdapter`: chamadas de `content.json` em paralelo — **não teve ganho, e o motivo importa**
+
+Implementado com o mesmo raciocínio (pool de 2, mesmo teto de `www.gov.uk`). **Medido ao vivo,
+antes/depois**: `discover govuk --terms "operational concept"` (62 documentos) levou 61s
+sequencial e **64s** com a pool — ganho zero.
+
+Causa raiz: `Fetcher._throttle()` roda **dentro** do semáforo de `concurrency`
+(`crawler/core/fetcher.py:312`), e serializa o **início** de cada requisição a
+`ultimo_hit + rate` — por host, não por slot de concorrência. Como `content.json` responde em
+menos de 1s e `rate` era 1.0s, a concorrência nunca chegava a ser o fator limitante de
+verdade: uma nova requisição só podia começar 1x/segundo de qualquer forma. **Abrir mais
+threads é seguro (o semáforo nunca deixa passar do configurado) mas não é o mesmo que ser
+eficaz** — a lição desta seção.
+
+### Fix aplicado 3 — `www.gov.uk`: `rate` reduzido de 1.0s para 0.5s (experimento do operador)
+
+Mesmo padrão do experimento de `concurrency: 3` de 2026-08-05 (`config/domains.yaml`, hosts
+sem limite publicado). **Validado ao vivo**: o mesmo teste (`"operational concept"`, 62
+documentos) caiu de 61-64s para **38.5s** — ganho real de ~40%, agora que a pool do Fix 2 tem
+o que fazer. Sem nenhum 429/403 novo na amostra testada. Risco assumido e registrado no
+comentário do YAML: reverter para 1.0s se aparecer erro de taxa.
+
+### Fix aplicado 4 — `Frontier`: `PRAGMA synchronous=NORMAL`
+
+`add()`/`mark()` fazem `commit()` dentro do único `RLock` do processo inteiro (compartilhado
+por TODAS as fontes rodando em paralelo, não por fonte/host — `crawler/core/frontier.py:139`).
+`journal_mode=WAL` sozinho ainda fazia fsync síncrono a cada commit; `synchronous=NORMAL` é a
+combinação documentada pelo próprio SQLite para WAL com escritores frequentes, e reduz o tempo
+que cada `add()` segura o lock — beneficia todas as fontes, não só as tocadas nos fixes 1-3.
+Risco: perder a última transação numa queda de energia (não um crash de processo comum) —
+inofensivo, porque a descoberta é idempotente por `(source, source_id)`.
+
+## 10. Impacto no cronograma
 
 | Item do plano | Situação |
 |---|---|

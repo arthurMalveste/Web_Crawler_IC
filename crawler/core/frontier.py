@@ -129,6 +129,16 @@ class Frontier:
         self.conn.row_factory = sqlite3.Row
         self.conn.executescript(SCHEMA)
         self.conn.execute("PRAGMA journal_mode=WAL")
+        # NORMAL (nao FULL, o padrao do SQLite fora de WAL) e' a combinacao
+        # recomendada pela propria documentacao do SQLite para WAL com
+        # escritores frequentes: evita o fsync sincrono a cada `commit()`
+        # (feito DENTRO de `self._lock` em `add()`/`mark()` — ver comentario
+        # da classe). O jornal WAL ja garante que a estrutura do banco nunca
+        # corrompe; o unico risco de NORMAL e' perder a ULTIMA transacao numa
+        # queda de energia (nao um crash de processo comum) — inofensivo
+        # aqui, porque `add()` e' idempotente por (source, source_id): na
+        # pior hipotese, redescobre 1 documento na proxima execucao.
+        self.conn.execute("PRAGMA synchronous=NORMAL")
         # Defesa extra para contencao vinda de FORA deste processo (ex.: rodar
         # `cli browse` enquanto um harvest esta em andamento): espera ate 30s
         # por um lock do SQLite em vez de falhar na hora com "database is

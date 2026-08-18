@@ -203,6 +203,44 @@ class TestNTRSPaginacao:
         assert len(recs) == 16 * DENSIDADE
 
 
+class TestNTRSParalelismo:
+    @respx.mock
+    def test_termos_em_paralelo_nao_duplicam_nem_perdem(self, fetcher):
+        """Achado real (2026-08-16): termos sao independentes entre si (nenhum
+        estado compartilhado em `_partitions`/`_walk`) e `ntrs.nasa.gov`
+        libera `concurrency: 2` — mas ate entao `discover()` andava um termo
+        de cada vez. Roda 2 termos ao mesmo tempo e trava que o resultado e'
+        exatamente a uniao dos dois, sem duplicar nem perder nada."""
+
+        def responder(request: httpx.Request) -> httpx.Response:
+            q = parse_qs(urlsplit(str(request.url)).query)
+            termo = q["q"][0].strip('"')
+            page_from = int(q.get("page.from", ["0"])[0])
+            page_size = int(q.get("page.size", ["500"])[0])
+            total = {"conops": 5, "operational concept": 7}[termo]
+            n = min(page_size, max(0, total - page_from))
+            return httpx.Response(
+                200,
+                json={
+                    "stats": {"total": total},
+                    "results": [{"id": f"{termo}-{page_from + i}", "title": "x"} for i in range(n)],
+                },
+            )
+
+        respx.get(url__startswith="https://ntrs.nasa.gov/api/citations/search").mock(
+            side_effect=responder
+        )
+
+        adapter = NTRSAdapter(
+            fetcher, terms=["conops", "operational concept"], year_start=2020, year_end=2020, page_size=3
+        )
+        recs = list(adapter.discover())
+        ids = {r.source_id for r in recs}
+
+        assert len(recs) == 12  # 5 + 7 — sem duplicar nem perder
+        assert ids == {f"conops-{i}" for i in range(5)} | {f"operational concept-{i}" for i in range(7)}
+
+
 # -------------------------------------------------------------------- ROSA P
 
 

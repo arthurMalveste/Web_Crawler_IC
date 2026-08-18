@@ -33,11 +33,16 @@ CONFIG_DIR = ROOT / "config"
 SOURCES_DIR = CONFIG_DIR / "sources"
 
 # Fontes por API dedicada não têm SourceSpec (config/sources/*.yaml) — o host
-# vem dos próprios adaptadores (crawler/adapters/ntrs.py, rosap.py) e das
-# entradas correspondentes em config/domains.yaml.
+# vem dos próprios adaptadores (crawler/adapters/ntrs.py, rosap.py, core_api.py,
+# govuk.py) e das entradas correspondentes em config/domains.yaml. Cada fonte
+# de API nova precisa ser adicionada aqui manualmente — `cli.py` descobre
+# "core"/"govuk" por `if name ==` direto, não por varredura de diretório,
+# então este painel não tem como listá-las sozinho.
 API_SOURCES: dict[str, list[str]] = {
     "ntrs": ["ntrs.nasa.gov"],
     "rosap": ["rosap.ntl.bts.gov"],
+    "core": ["api.core.ac.uk"],
+    "govuk": ["www.gov.uk", "assets.publishing.service.gov.uk"],
 }
 
 

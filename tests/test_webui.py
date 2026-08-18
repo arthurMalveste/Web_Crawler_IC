@@ -68,9 +68,14 @@ def sem_subprocess(monkeypatch, isolado):
 
 class TestMetrics:
     def test_list_sources_inclui_api_e_crawl(self, isolado):
+        """Achado real (2026-08-16): `core` e depois `govuk` foram
+        implementados em `cli.py` mas esquecidos em `API_SOURCES` — o painel
+        web nunca lista uma fonte de API que nao esteja nesse dict manual,
+        entao "adicionar um adaptador novo" e "aparecer no painel" nao sao a
+        mesma coisa. Trava aqui pra nao repetir."""
         fontes = metrics.list_sources()
         nomes = {f["nome"] for f in fontes}
-        assert {"ntrs", "rosap"} <= nomes
+        assert {"ntrs", "rosap", "core", "govuk"} <= nomes
         # toda fonte com SourceSpec (config/sources/*.yaml) tem que aparecer
         specs_no_disco = {p.stem for p in metrics.SOURCES_DIR.glob("*.yaml")}
         assert specs_no_disco <= nomes

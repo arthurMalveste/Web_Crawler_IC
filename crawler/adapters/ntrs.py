@@ -25,7 +25,9 @@ esses headers e se auto-ajusta).
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Iterator
+from urllib.parse import urlsplit
 
 import structlog
 
@@ -134,9 +136,29 @@ class NTRSAdapter(BaseAdapter):
     # -------------------------------------------------------------- descoberta
 
     def discover(self) -> Iterator[DocumentRecord]:
-        for term in self.terms:
-            for y0, y1 in self._partitions(term):
-                yield from self._walk(term, y0, y1)
+        """Termos sao independentes entre si (nenhum estado compartilhado em
+        `_partitions`/`_walk`), e `ntrs.nasa.gov` libera `concurrency: 2`
+        (`config/domains.yaml`) — mas ate 2026-08-16 isso nunca era usado, o
+        adaptador andava um termo de cada vez. `Fetcher.fetch()` ja limita
+        chamadas concorrentes ao MESMO host via semaforo por host
+        (`crawler/core/fetcher.py`), entao abrir mais threads aqui nunca
+        estoura o teto do servidor — so' aproveita o que ja era permitido.
+
+        Cada worker materializa a lista de UM termo (`_walk_term`) antes de
+        devolver: `yield` atraves de threads exigiria uma fila; coletar por
+        termo e' mais simples e o custo de memoria e' trivial (metadados, nao
+        arquivos).
+        """
+        host = urlsplit(API).netloc
+        n_workers = max(1, min(self.fetcher.policy_for(host).concurrency, 32))
+        with ThreadPoolExecutor(max_workers=n_workers, thread_name_prefix="ntrs-termo") as pool:
+            futuros = [pool.submit(lambda t=term: list(self._walk_term(t))) for term in self.terms]
+            for fut in as_completed(futuros):
+                yield from fut.result()
+
+    def _walk_term(self, term: str) -> Iterator[DocumentRecord]:
+        for y0, y1 in self._partitions(term):
+            yield from self._walk(term, y0, y1)
 
     def _walk(self, term: str, y0: int, y1: int) -> Iterator[DocumentRecord]:
         page_from = 0
