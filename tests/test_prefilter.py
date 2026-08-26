@@ -265,13 +265,25 @@ class TestPortaDeSafety:
         assert br.has_safety is False
 
 
-class TestInvarianteDaBranchAditiva:
-    def test_nenhuma_penalidade_nova_esta_ativa(self, lex):
-        """Branch A so soma. Se algum peso novo fosse negativo ou a porta de
-        safety estivesse ligada, um documento hoje aceito poderia ser rebaixado
-        — e a diferenca A vs B deixaria de ser atribuivel so a penalidade."""
-        assert lex.variant == "additive"
-        assert lex.require_safety is False
+class TestInvarianteDaVariante:
+    """As branches do experimento compartilham TODO o codigo e diferem so pelo
+    YAML. Estes testes rodam identicos nas tres e travam essa propriedade — se
+    algum deles precisasse ser diferente por branch, a comparacao entre os
+    corpora deixaria de ser atribuivel apenas ao lexico.
+    """
+
+    def test_variante_coerente_com_a_porta(self, lex):
+        """`variant` e' o rotulo gravado junto do corpus; `require` e' o que de
+        fato muda a pontuacao. Se divergirem, um corpus sai com identidade
+        errada e a analise posterior fica inauditavel."""
+        assert lex.variant in ("additive", "penalizing")
+        assert lex.require_safety is (lex.variant == "penalizing")
+
+    def test_nenhum_peso_novo_e_negativo(self, lex):
+        """A penalidade e' o UNICO mecanismo de subtracao introduzido, e vive em
+        `safety_gate.penalty` — nao nos pesos. Um peso negativo aqui rebaixaria
+        documentos nas TRES variantes, e a diferenca entre elas deixaria de
+        isolar a porta."""
         assert all(
             peso >= 0
             for peso in (
@@ -283,3 +295,7 @@ class TestInvarianteDaBranchAditiva:
                 lex.w_safety_support,
             )
         )
+
+    def test_escopo_da_porta_e_conhecido(self, lex):
+        assert lex.gate_scope in ("core_or_domain", "core_only")
+        assert lex.penalty_no_safety < 0
