@@ -6,12 +6,27 @@
 # Normalizacao aplicada antes do casamento (ver prefilter.py):
 #   minusculas, NFKD sem diacriticos, pontuacao -> espaco, espacos colapsados.
 # Portanto "CON OPS", "Con-Ops" e "con ops" casam com o padrao "con ops".
+#
+# ATENCAO ao casamento por FRONTEIRA DE PALAVRA (`f" {termo} " in padded`):
+# um termo no singular NAO casa com a ocorrencia no plural. Foi assim que
+# "justification for change" ficou dois anos sem casar com o cabecalho real da
+# norma, "Justification for changes". Ao adicionar um termo, decida se precisa
+# das duas formas.
 
-version: 1
+version: 2
+
+#: `additive`  — so soma pontos (branch exp/lexico-stpa-iso-aditivo)
+#: `penalizing`— soma e penaliza ausencia de safety (branch .../penalizado)
+#: Unica diferenca entre as duas branches, junto com `safety_gate.require`.
+variant: additive
 
 # --- SINAL FORTE -------------------------------------------------------------
 # Nomes institucionais do artefato. No TITULO -> faixa `strong` (baixar sempre).
 # Em abstract/subject -> contribui para `weak`.
+#
+# Nao repetir formas que ja sao cobertas por substring com fronteira de palavra:
+# "operational concept" ja casa dentro de "system operational concept" e de
+# "preliminary operational concept". Os quatro ultimos sao lacunas REAIS.
 strong_terms:
   - concept of operations
   - concepts of operations
@@ -35,6 +50,12 @@ strong_terms:
   - operational concept document
   - concept of use
   - conuse
+  # ISO/IEC/IEEE 29148:2018 — o singular do Annex B (B.2 "Concept of operation
+  # content") nao casa com o plural acima.
+  - concept of operation
+  - operation concept
+  - conops document
+  - opscon document
 
 # Sinal moderado: sugerem conteudo de concepcao sem nomear o artefato.
 # Nunca elevam sozinhos para `strong`; somam pontos para `weak`.
@@ -51,9 +72,30 @@ moderate_terms:
   - operational need
   - modes of operation
   - operational environment
+  # Conceitos de ciclo de vida irmaos do OpsCon (29148:2018, 6.2.3.4): um
+  # documento que enumera estes cinco esta descrevendo a fase de concepcao,
+  # mesmo sem usar a palavra ConOps.
+  - acquisition concept
+  - deployment concept
+  - support concept
+  - retirement concept
+  - life cycle concept
+  - life cycle concepts
+  - preliminary life cycle concepts
+  - other life cycle concepts
+  - context of use
+  - operational context
+  - user classes
+  - measures of effectiveness
+  - measures of performance
+  - technical performance measure
+  - operational deployment
+  - mission profile
+  - day in the life
+  - concept definition
 
 # --- ASSINATURA ESTRUTURAL ---------------------------------------------------
-# Titulos de secao canonicos da ISO/IEC/IEEE 29148:2011 (clausula ConOps) e da
+# Titulos de secao canonicos da ISO/IEC/IEEE 29148 (2011 e 2018, Annex A) e da
 # ANSI/AIAA G-043A-2012. Sao sinal muito mais especifico que o termo isolado:
 # raramente aparecem juntos fora de um documento de concepcao de verdade.
 #
@@ -78,6 +120,74 @@ structural_signature:
   - modes of operation
   - user classes and other involved personnel
   - operational policies and constraints
+  # --- ISO/IEC/IEEE 29148:2018, Annex A (normativo) e clausulas 9.3/9.4.
+  # Redacao revista da segunda edicao e cabecalhos que nao existiam na de 2011.
+  - justification for changes                    # A.2.5.2 — o singular acima NAO casa com isto
+  - nature of changes
+  - description of the current system or situation  # A.2.4.4
+  - description of desired changes               # A.2.5.3
+  - priorities among changes                     # A.2.5.4
+  - changes considered but not included          # A.2.5.5
+  - profiles of user classes                     # A.2.4.6.2
+  - interactions among user classes              # A.2.4.6.3
+  - other involved personnel                     # A.2.4.6.4
+  - modes of operation for the current system    # A.2.4.5
+  - background objectives and scope              # A.2.4.2 / A.2.6.2
+  - disadvantages and limitations                # A.2.9.3 (2011/AIAA dizia "advantages and limitations")
+  - alternatives considered                      # A.2.9.4 (2011/AIAA dizia "alternatives and trade-offs")
+  - other detailed concepts of proposed system   # 9.4.18
+  - high level operational concept               # 9.3.16
+  - high level operational scenarios             # 9.3.17
+  - other high level life cycle concepts         # 9.3.18
+  - system operational modes and states          # 9.4.13
+
+# --- ASSINATURA ESTRUTURAL COM PORTA -----------------------------------------
+# ISO/IEC/IEEE 29148:2018, Annex B (informativo) — "Concept of operations",
+# p. 87-88: o ConOps em nivel de ORGANIZACAO (estrategia, governanca,
+# continuidade de negocio), que a edicao de 2011 nao tinha.
+#
+# Os cabecalhos do Annex B sao palavras como "Purpose", "Scope", "Security",
+# "Compliance". Isolados nao valem NADA — estao em quase todo documento
+# tecnico, e a 4.0 do bloco acima um unico acerto ja passaria de `weak_min`.
+# Juntos sao outra coisa: sao a sumario de um ConOps organizacional.
+#
+# Por isso a porta: nada pontua ate `min_hits` termos DISTINTOS casarem no mesmo
+# documento. E a regra que o comentario da assinatura estrutural sempre
+# descreveu ("raramente aparecem juntos") e que o codigo nunca impunha.
+structural_generic:
+  min_hits: 5
+  weight: 2.0          # metade do standalone: cada termo isolado e' fraco
+  terms:
+    # --- Annex B (informativo) — Concept of operations, p. 87-88
+    - concept of operation content     # B.2
+    - strategic plan                   # B.2.3
+    - effectiveness                    # B.2.4
+    - overall operation                # B.2.5
+    - organizational unit              # B.2.5.3
+    - governance                       # B.2.6
+    - governance policies              # B.2.6.1
+    - investment plan                  # B.2.6.3
+    - information asset management     # B.2.6.4
+    - business continuity plan         # B.2.6.6
+    - compliance                       # B.2.6.7
+    - purpose                          # B.2.1
+    - scope                            # B.2.2
+    - context                          # B.2.5.1
+    - systems                          # B.2.5.2
+    - organization                     # B.2.6.2
+    - security                         # B.2.6.5
+    # --- Annex A (normativo) — genericos demais para valerem sozinhos
+    - identification                   # A.2.2.2
+    - document overview                # A.2.2.3
+    - system overview                  # A.2.2.4
+    - referenced documents             # A.2.3
+    - organizational structure         # A.2.4.6.1
+    - assumptions and constraints      # A.2.5.6
+    - benefits                         # A.2.9.2
+    - appendices                       # A.2.10
+    - glossary                         # A.2.11
+    - overview
+    - background
 
 # --- NEGATIVOS ADVERSARIAIS --------------------------------------------------
 # Contem sinal forte mas NAO sao documentos de concepcao. Rebaixam a faixa de
@@ -109,24 +219,128 @@ adversarial_markers:
   - training syllabus
   - course outline
 
-# --- VOCABULARIO DE SAFETY / STPA -------------------------------------------
-# Nao indica ConOps. Reservado para alimentar o dicionario da Etapa 3 — nao
-# consumido por nenhum codigo desta etapa hoje (o uso anterior, identificar
-# hard negatives do acervo PSAS, foi removido em 2026-08-06).
-safety_terms:
+# --- VOCABULARIO STPA / STAMP ------------------------------------------------
+# Nomeia o metodo de forma inequivoca. NAO indica ConOps — indica dominio
+# critico. Por isso os pesos ficam abaixo dos de `strong_terms`: um paper puro
+# de STPA sobe no maximo para `weak` (revisao manual), nunca para `strong`.
+#
+# Consumido desde 2026-08-26. Antes disso o bloco existia como `safety_terms` e
+# era carregado sem nunca ser lido por codigo nenhum.
+safety_core:
   - stpa
   - stamp
+  - stpa sec                          # "STPA-Sec"; "stpa" ja casa aqui — ponto duplo intencional
+  - stpa safesec
   - system theoretic process analysis
+  - systems theoretic process analysis
+  - system theoretic accident model
   - systems theoretic accident model
-  - hazard analysis
-  - safety control structure
+  - systems theoretic accident model and processes
+  - causal analysis based on system theory
+  - cast analysis                     # NUNCA "cast" isolado: casaria com fundicao, elenco, etc.
+  - system theoretic early concept analysis
   - unsafe control action
+  - unsafe control actions
+  - hazardous control action
+  - inadequate control action
   - loss scenario
+  - loss scenarios
+  - causal scenario
+  - system level hazard
+  - system level hazards
+  - system level constraint
+  - system level constraints
+  - safety constraint
+  - safety constraints
+  - unacceptable loss
+  - component interaction accident
+  - safety guided design
+  - safety control structure
+  - hierarchical control structure
+  - stopped too soon                  # tipologia de UCA (STPA Handbook)
+  - applied too long
+  - leveson
+
+# --- SAFETY CLASSICA / CERTIFICACAO / SISTEMAS CRITICOS ----------------------
+# Nao e STPA, mas situa o documento no dominio de sistemas criticos. Separado de
+# `safety_core` porque a porta da variante penalizada pode exigir so o core
+# (`safety_gate.scope: core_only`) ou os dois (`core_or_domain`).
+safety_domain:
+  - hazard analysis
+  - functional hazard analysis
   - functional hazard assessment
+  - preliminary hazard analysis
   - fault tree
+  - fault tree analysis
+  - event tree analysis
+  - bow tie analysis
   - fmea
+  - fmeca
+  - hazop
+  - hazard and operability
   - safety case
+  - assurance case
+  - goal structuring notation
   - system safety
+  - safety integrity level
+  - design assurance level
+  - asil
+  - mil std 882
+  - iec 61508
+  - iso 26262
+  - iec 62304
+  - en 50128
+  - do 178c
+  - do 254
+  - arp4754a
+  - arp 4754
+  - arp4761
+  - arp 4761
+  - safety critical
+  - safety critical system
+  - safety critical systems
+  - mission critical
+  - high integrity system
+  - fail safe
+  - fail operational
+  - fault tolerance
+  - fault tolerant
+  - single point of failure
+  - common cause failure
+  - mode confusion
+  - automation surprise
+
+# --- MECANISMO DO STPA, COM PORTA --------------------------------------------
+# Vocabulario da estrutura de controle. Isolado e' engenharia de controle
+# generica: "control structure" aparece em organograma, quimica de processos e
+# teoria de controle classica; "feedback loop" esta em qualquer lugar. Em
+# conjunto, e' uma analise STPA.
+#
+# Fora da lista de proposito: `controller`, `actuator`, `sensor` isolados —
+# ruidosos demais em qualquer paper de embarcados, mesmo com porta.
+safety_supporting:
+  min_hits: 4
+  weight: 1.5
+  terms:
+    - control structure
+    - control structure diagram
+    - control action
+    - control actions
+    - controlled process
+    - control loop
+    - feedback loop
+    - process model
+    - process model flaw
+    - control algorithm
+    - control flaw
+    - inadequate control
+    - emergent property
+    - emergent properties
+    - unsafe interaction
+    - too early too late
+    - wrong timing or order
+    - providing causes hazard
+    - not providing causes hazard
 
 # --- PESOS E LIMIARES --------------------------------------------------------
 scoring:
@@ -135,8 +349,28 @@ scoring:
   weight_moderate_title: 2.0
   weight_moderate_body: 0.5
   weight_structural: 4.0         # por secao canonica distinta encontrada
+  # Safety: deliberadamente abaixo de `strong`. STPA nao e indicio de ConOps,
+  # e indicio de dominio critico — nao pode promover a `strong` sozinho.
+  weight_safety_core_title: 3.0
+  weight_safety_core_body: 1.0
+  weight_safety_domain_title: 1.5
+  weight_safety_domain_body: 0.5
   penalty_adversarial_title: -6.0
   penalty_adversarial_body: -1.5
+
+# --- PORTA DE SAFETY ---------------------------------------------------------
+# `require: false` -> este bloco e' inerte e o comportamento e' identico ao de
+# antes de existir. E' o que sustenta atribuir a diferenca entre as duas
+# branches EXCLUSIVAMENTE a penalidade: o codigo e' o mesmo, muda uma linha.
+#
+# `require: true` (branch exp/lexico-stpa-iso-penalizado):
+#   - soma `penalty` ao score de todo documento SEM vocabulario de safety;
+#   - e impede a promocao a `strong`, inclusive pelo atalho booleano do termo
+#     forte no titulo — sem isso a penalidade quase nao mudaria a faixa.
+safety_gate:
+  require: false
+  penalty: -4.0
+  scope: core_or_domain          # ou `core_only`: exige STPA propriamente dito
 
 thresholds:
   # strong: sinal forte no titulo e sem marcador adversarial no titulo.

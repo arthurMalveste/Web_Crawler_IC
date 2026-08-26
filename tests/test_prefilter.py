@@ -115,13 +115,171 @@ class TestFaixaNegativa:
 
 
 class TestJargaoDeSafetyPSAS:
-    def test_jargao_de_safety_nao_e_conops(self, lex):
-        """Acervo PSAS: denso em terminologia STPA, mas nao sao ConOps — a
-        classificacao de tier continua correta mesmo sem a maquina de hard
-        negatives (removida em 2026-08-06) que existia so para guardar isso."""
+    def test_jargao_de_safety_vai_para_revisao_manual(self, lex):
+        """Acervo PSAS: denso em terminologia STPA, mas nao sao ConOps.
+
+        MUDANCA DELIBERADA (2026-08-26). Ate aqui este caso era `negative`:
+        `safety_terms` existia no YAML mas nenhum codigo lia. Com `safety_core`
+        pontuando, o mesmo documento soma 5.5 (3.0 de "stpa" no titulo + 2.0 de
+        dois termos no corpo + 0.5 de "hazard analysis") e vai para `weak`.
+
+        `weak` significa REVISAO MANUAL, nao "aceito como ConOps" — e por isso
+        que os pesos de safety ficam abaixo de `strong_min`: sozinhos nunca
+        promovem a `strong`. O custo esperado disso e' o acervo PSAS entrar em
+        peso na faixa de revisao; e' exatamente o que o experimento A vs B
+        pretende medir.
+        """
         r = rec(
             "STPA Applied to Automotive Steering",
             "Hazard analysis using the safety control structure and unsafe control actions.",
         )
         br = lex.score_record(r)
+        assert br.has_safety
+        assert br.tier == TIER_WEAK
+        assert not br.strong_in_title
+
+    def test_safety_sozinho_nunca_promove_a_strong(self, lex):
+        """Mesmo saturado de vocabulario STPA, sem sinal de ConOps nao passa."""
+        br = lex.score_text(
+            "STPA and STAMP for Rail Signalling",
+            "Unsafe control actions, loss scenarios, system level hazards and "
+            "safety constraints derived from the hierarchical control structure. "
+            "Fault tree analysis and FMEA were used for comparison.",
+        )
+        assert br.tier == TIER_WEAK
+
+
+class TestFronteiraDePalavra:
+    """O casamento e' `f" {termo} " in padded`: singular nao casa com plural.
+
+    Foi assim que `justification for change` passou a vida sem casar com o
+    cabecalho real da norma. Ambos os casos aqui sao regressoes de termos que a
+    ISO 29148:2018 escreve de forma diferente da de 2011.
+    """
+
+    def test_plural_do_cabecalho_a_2_5_2(self, lex):
+        br = lex.score_text(None, "Section 3 covers justification for changes.")
+        assert "justification for changes" in br.matched_terms
+
+    def test_singular_do_annex_b(self, lex):
+        # Annex B, B.2: "Concept of operation content" — sem o "s".
+        br = lex.score_text("Concept of operation content", None)
+        assert "concept of operation" in br.matched_terms
+        assert "concept of operations" not in br.matched_terms
+        assert br.tier == TIER_STRONG
+
+
+class TestPortaDeCoocorrencia:
+    """`structural_generic`: nada vale ate `min_hits` termos distintos casarem.
+
+    Os cabecalhos do Annex B sao "Purpose", "Scope", "Security", "Compliance".
+    Sem a porta, um unico acerto passaria de `weak_min` e quase todo documento
+    tecnico entraria no corpus.
+    """
+
+    @staticmethod
+    def _lex(min_hits: int) -> Lexicon:
+        return Lexicon(
+            {
+                "structural_generic": {
+                    "min_hits": min_hits,
+                    "weight": 2.0,
+                    "terms": ["purpose", "scope", "security", "compliance", "governance"],
+                },
+                "thresholds": {"strong_min_score": 10.0, "weak_min_score": 2.5},
+            }
+        )
+
+    def test_abaixo_da_porta_nao_pontua(self):
+        br = self._lex(5).score_text("Relatorio", "purpose, scope and security of the platform")
+        assert br.score == 0.0
+        assert br.structural_generic_hits == 0
         assert br.tier == TIER_NEGATIVE
+
+    def test_abaixo_da_porta_nao_suja_matched_terms(self):
+        """Os parciais nao podem vazar para a auditoria: se "purpose" e "scope"
+        aparecessem em `matched_terms` sem terem pontuado, a inspecao manual
+        perderia o unico sinal que usa para atribuir um documento a um termo."""
+        br = self._lex(5).score_text("Relatorio", "purpose, scope and security")
+        assert br.matched_terms == []
+
+    def test_na_porta_pontua_todos_os_acertos(self):
+        br = self._lex(5).score_text(None, "purpose scope security compliance governance")
+        assert br.structural_generic_hits == 5
+        assert br.score == pytest.approx(10.0)
+
+
+class TestPortaDeSafety:
+    """A UNICA diferenca entre as branches aditiva e penalizada.
+
+    O codigo e' identico nas duas; muda `safety_gate.require` no YAML. Estes
+    testes sao o que sustenta atribuir a diferenca de corpus exclusivamente a
+    penalidade.
+    """
+
+    @staticmethod
+    def _lex(require: bool) -> Lexicon:
+        return Lexicon(
+            {
+                "strong_terms": ["concept of operations"],
+                "safety_core": ["stpa"],
+                "safety_gate": {"require": require, "penalty": -4.0, "scope": "core_or_domain"},
+                "thresholds": {"strong_min_score": 10.0, "weak_min_score": 2.5},
+            }
+        )
+
+    def test_aditiva_nao_penaliza_ausencia(self):
+        br = self._lex(False).score_text("System X Concept of Operations", None)
+        assert br.has_safety is False
+        assert br.score == pytest.approx(10.0)
+        assert br.tier == TIER_STRONG
+
+    def test_penalizada_barra_ate_o_atalho_booleano(self):
+        """Sem o gate na primeira regra de faixa, um termo forte no titulo
+        viraria `strong` apesar da penalidade — e a branch B nao mediria nada,
+        porque `strong_t and not adv_t` ignora o score por completo."""
+        br = self._lex(True).score_text("System X Concept of Operations", None)
+        assert br.has_safety is False
+        assert br.score == pytest.approx(6.0)  # 10.0 - 4.0
+        assert br.tier != TIER_STRONG
+
+    def test_penalizada_preserva_quem_tem_safety(self):
+        br = self._lex(True).score_text("STPA-based Concept of Operations for Rail", None)
+        assert br.has_safety is True
+        assert br.score == pytest.approx(13.0)
+        assert br.tier == TIER_STRONG
+
+    def test_escopo_core_only_ignora_safety_classica(self):
+        """`scope: core_only` exige STPA propriamente dito; "hazard analysis"
+        sozinho nao abre a porta. E' a sub-variante B2."""
+        lex = Lexicon(
+            {
+                "strong_terms": ["concept of operations"],
+                "safety_core": ["stpa"],
+                "safety_domain": ["hazard analysis"],
+                "safety_gate": {"require": True, "penalty": -4.0, "scope": "core_only"},
+                "thresholds": {"strong_min_score": 10.0, "weak_min_score": 2.5},
+            }
+        )
+        br = lex.score_text("Concept of Operations", "Includes a hazard analysis.")
+        assert br.has_safety is False
+
+
+class TestInvarianteDaBranchAditiva:
+    def test_nenhuma_penalidade_nova_esta_ativa(self, lex):
+        """Branch A so soma. Se algum peso novo fosse negativo ou a porta de
+        safety estivesse ligada, um documento hoje aceito poderia ser rebaixado
+        — e a diferenca A vs B deixaria de ser atribuivel so a penalidade."""
+        assert lex.variant == "additive"
+        assert lex.require_safety is False
+        assert all(
+            peso >= 0
+            for peso in (
+                lex.w_safety_core_title,
+                lex.w_safety_core_body,
+                lex.w_safety_dom_title,
+                lex.w_safety_dom_body,
+                lex.w_struct_generic,
+                lex.w_safety_support,
+            )
+        )

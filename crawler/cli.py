@@ -47,14 +47,33 @@ SOURCES_DIR = CONFIG_DIR / "sources"
 #: Termos de sinal forte do lexico, usados como consulta pelas fontes de API
 #: que aceitam busca textual (NTRS, CORE, GOV.UK) — e o mesmo vocabulario que
 #: decide a faixa, entao consulta e filtro nao divergem.
+#:
+#: E' um SUBCONJUNTO CURADO de `strong_terms`, nao a lista inteira: cada entrada
+#: custa uma varredura completa da fonte, e buscar "operational concept
+#: description" nao acrescenta nada a quem ja busca "operational concept".
+#: Ficam de fora, por redundancia de prefixo: as formas no plural, "* document",
+#: "science operations concept" e "operational concept description".
+#:
+#: A regra que faltava e' a inversa: nada aqui pode estar AUSENTE de
+#: `strong_terms`, senao a consulta traz o que o filtro depois descarta.
+#: `tests/test_cli.py::TestConsultaVersusLexico` trava isso — a lista ja tinha
+#: divergido antes (achado do GOV.UK, "operating concept", em docs/achados-api.md).
 TERMOS_LEXICO_FORTE = [
     "concept of operations",
+    "concept of operation",  # 29148:2018 B.2 — singular nao casa com o plural
     "conops",
     "operational concept",
+    "operation concept",
     "operations concept",
     "operating concept",
+    "opscon",
     "concept of employment",
+    "conemp",
     "mission operations concept",
+    "mission concept",
+    "concept of use",
+    "conuse",
+    "system operational description",
 ]
 
 

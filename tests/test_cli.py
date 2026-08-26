@@ -163,3 +163,43 @@ class TestDiscoverAll:
             f"levou {decorrido:.2f}s para {len(fontes_falsas)} fontes de {atraso}s — "
             f"parece serial (limite serial seria >= {limite_serial:.2f}s)"
         )
+
+
+class TestConsultaVersusLexico:
+    """`TERMOS_LEXICO_FORTE` e `strong_terms` sao duas listas que precisam
+    concordar, e ja divergiram: o MOD britanico nomeia o artefato "Operating
+    Concept", e ate o achado do GOV.UK (docs/achados-api.md) o termo estava
+    numa lista e nao na outra. Nada no codigo impedia isso.
+
+    A direcao que importa e' so uma: tudo que se BUSCA precisa pontuar. O
+    contrario e' legitimo — `strong_terms` tem formas redundantes de prefixo
+    ("operational concept description") que seriam desperdicio de varredura.
+    """
+
+    def test_todo_termo_buscado_pontua_no_lexico(self):
+        from pathlib import Path
+
+        from crawler.core.prefilter import Lexicon, normalize
+
+        lex = Lexicon.load(Path(cli.CONFIG_DIR) / "lexicon.yaml")
+        ausentes = [t for t in cli.TERMOS_LEXICO_FORTE if normalize(t) not in lex.strong]
+        assert not ausentes, (
+            f"termos usados como consulta mas ausentes de strong_terms: {ausentes} — "
+            "a consulta traria o que o filtro depois descarta"
+        )
+
+    def test_orcamento_de_varredura(self):
+        """Cada entrada custa uma varredura completa de cada fonte de API.
+
+        Nao da' para testar redundancia por substring: se buscar "concept of
+        operation" ja traz "Concept of Operations" depende de o motor fazer
+        stemming, e isso varia entre NTRS (Elasticsearch), CORE e GOV.UK. Como
+        nao da' para verificar sem bater nas APIs, mantem-se as duas formas — o
+        custo e' uma varredura, o risco de remover e' perder recall silenciosa-
+        mente. O que DA' para travar e' o teto: a lista nao pode virar
+        `strong_terms` inteiro sem alguem decidir isso de proposito.
+        """
+        assert len(cli.TERMOS_LEXICO_FORTE) <= 16, (
+            f"{len(cli.TERMOS_LEXICO_FORTE)} termos de consulta — cada um e' uma "
+            "varredura por fonte; confirme que o custo de crawl e' aceitavel"
+        )
