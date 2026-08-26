@@ -517,7 +517,52 @@ que cada `add()` segura o lock — beneficia todas as fontes, não só as tocada
 Risco: perder a última transação numa queda de energia (não um crash de processo comum) —
 inofensivo, porque a descoberta é idempotente por `(source, source_id)`.
 
-## 10. Impacto no cronograma
+## 10. `discover-all` crashava inteiro por causa de um erro do Playwright — dois bugs em cadeia
+
+**Data da verificação:** 2026-08-19, contra um log real de execução via painel web
+(`reports/webui-runs/48aa28ab.log`).
+
+Você reportou uma execução de `discover-all` (dtic, esa_cosmos, esa_eof, faa, psas,
+rosap_crawl) que terminou com `código 1` (falhou) e três fontes (`dtic`, `psas`,
+`rosap_crawl`) com `0 URLs vasculhadas` — nem chegaram a rodar de verdade. Investigação no log
+completo (não só o trecho truncado do painel) achou dois bugs em cadeia, não um:
+
+### Causa raiz 1 — Chromium do Playwright não instalado
+
+```
+playwright._impl._errors.Error: BrowserType.launch: Executable doesn't exist at
+C:\Users\arthu\AppData\Local\ms-playwright\chromium-1140\chrome-win\chrome.exe
+```
+`esa_eof` é a única fonte com `render: true` ([crawler/engine/renderer.py:59](crawler/engine/renderer.py#L59)). O binário nunca tinha sido baixado nesta máquina/venv (ou foi baixado
+para outra versão do pacote `playwright`). Sozinho, isso seria recuperável — `_rodar()`
+([cli.py:226-233](crawler/cli.py#L226)) já captura qualquer `Exception` por fonte.
+
+### Causa raiz 2 (o bug real) — logar o erro do Playwright derrubava o processo inteiro
+
+O Playwright embute o banner decorativo (bordas Unicode `═ ║ ╔ ╗`) **dentro da própria
+mensagem** da exceção. No Windows, sem configuração explícita, `sys.stdout` abre na codepage
+do console (cp1252), que não representa esses caracteres — o `log.error(...)` que tentava
+registrar o erro da fonte 1 quebrava com `UnicodeEncodeError`, uma SEGUNDA exceção, sem
+nenhum `try/except` ao redor. Essa segunda exceção subia até `fut.result()` em
+`cmd_discover_all` ([cli.py:241](crawler/cli.py#L241)) e matava o processo inteiro —
+abandonando qualquer fonte ainda em andamento (`dtic`/`psas`/`rosap_crawl`), mesmo sem
+nenhuma relação com o Playwright.
+
+### Correções
+
+1. `playwright install chromium` — resolve a causa 1. Confirmado ao vivo: `renderer.pronto`
+   aparece no log, `discover esa_eof` roda os 15s inteiros sem erro.
+2. `crawler/cli.py::setup_logging()` — `sys.stdout`/`sys.stderr` reconfigurados para UTF-8
+   com `errors="backslashreplace"` logo no início. Resolve a causa raiz de verdade: qualquer
+   exceção futura com caractere fora da codepage do console agora vira `\uXXXX` legível no
+   log, em vez de derrubar o processo. Reproduzido ao vivo o cenário exato do crash (logar o
+   banner do Playwright) antes e depois da correção — antes crashava, depois não.
+
+Suíte completa: 232 passed (1 falha isolada e não-relacionada, `test_taxa_minima_vale_mesmo_
+com_concorrencia_maior_que_um`, sensível a timing sob carga — passou sozinha e na rodada
+seguinte).
+
+## 11. Impacto no cronograma
 
 | Item do plano | Situação |
 |---|---|

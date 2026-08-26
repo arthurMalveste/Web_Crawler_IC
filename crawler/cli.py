@@ -59,6 +59,23 @@ TERMOS_LEXICO_FORTE = [
 
 
 def setup_logging(verbose: bool = False) -> None:
+    # Achado real (2026-08-19): no Windows, sem isto, `sys.stdout` abre na
+    # codepage do console (cp1252 tipicamente), nao UTF-8. Uma excecao com
+    # caractere fora dessa codepage — ex.: o Playwright embute bordas
+    # Unicode (═, ║...) na PROPRIA mensagem de erro quando o navegador nao
+    # esta instalado — faz o `print()` do log da excecao quebrar com
+    # `UnicodeEncodeError`. Essa segunda excecao NAO esta protegida por
+    # nenhum `try/except` (acontece dentro do proprio bloco que trata a
+    # primeira), sobe ate `cmd_discover_all` e derruba o processo inteiro —
+    # levando junto fontes que nao tinham nada a ver com o erro original.
+    # `errors="backslashreplace"` garante que isto nunca mais aconteca: na
+    # pior hipotese um caractere vira `\uXXXX` legivel no log, em vez de
+    # crashar. Isto e' independente do webui abrir o arquivo de log em UTF-8
+    # (`webui/jobs.py`) — o que importa aqui e' a codificacao do PROPRIO
+    # `sys.stdout` deste processo filho, nao de como o pai redireciona.
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="backslashreplace")
     logging.basicConfig(
         format="%(message)s", stream=sys.stdout, level=logging.DEBUG if verbose else logging.INFO
     )
