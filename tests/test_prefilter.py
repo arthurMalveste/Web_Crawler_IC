@@ -20,6 +20,21 @@ def lex() -> Lexicon:
     return Lexicon.load(CONFIG)
 
 
+def promove_a_strong(lex: Lexicon, br) -> bool:
+    """A faixa final depende da variante; o SINAL nao.
+
+    Na variante penalizada, um documento sem vocabulario de safety nao chega a
+    `strong` por mais forte que seja o sinal de ConOps — e' exatamente o efeito
+    que essa branch existe para medir. Os testes abaixo carregam o YAML da
+    branch em que rodam, entao afirmam incondicionalmente o que e' invariante
+    (`strong_in_title`, `matched_terms`) e condicionam so a faixa.
+
+    A semantica da porta em si nao depende deste helper: `TestPortaDeSafety`
+    monta os dois lexicos a mao e roda igual nas tres branches.
+    """
+    return br.has_safety or not lex.require_safety
+
+
 def rec(title: str, abstract: str | None = None, subjects: list[str] | None = None):
     return DocumentRecord(
         source="t",
@@ -58,8 +73,9 @@ class TestFaixaStrong:
     )
     def test_sinal_forte_no_titulo(self, lex, titulo):
         br = lex.score_text(titulo, None)
-        assert br.tier == TIER_STRONG
         assert br.strong_in_title
+        if promove_a_strong(lex, br):
+            assert br.tier == TIER_STRONG
 
 
 class TestFaixaWeak:
@@ -68,7 +84,10 @@ class TestFaixaWeak:
             "Airspace Modernization Study",
             "This study documents the concept of operations for the future system.",
         )
-        assert br.tier == TIER_WEAK
+        assert "concept of operations" in br.matched_terms
+        assert not br.strong_in_title
+        if promove_a_strong(lex, br):
+            assert br.tier == TIER_WEAK
 
     def test_assinatura_estrutural_iso29148(self, lex):
         # Titulos de secao canonicos: sinal bem mais especifico que o termo solto.
@@ -166,7 +185,9 @@ class TestFronteiraDePalavra:
         br = lex.score_text("Concept of operation content", None)
         assert "concept of operation" in br.matched_terms
         assert "concept of operations" not in br.matched_terms
-        assert br.tier == TIER_STRONG
+        assert br.strong_in_title
+        if promove_a_strong(lex, br):
+            assert br.tier == TIER_STRONG
 
 
 class TestPortaDeCoocorrencia:
