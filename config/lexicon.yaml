@@ -370,7 +370,7 @@ scoring:
 safety_gate:
   require: true
   penalty: -4.0
-  scope: core_or_domain          # ou `core_only`: exige STPA propriamente dito
+  scope: core_only               # sub-variante B2: exige STPA proprio, ignora safety classica
 
 thresholds:
   # strong: sinal forte no titulo e sem marcador adversarial no titulo.
