@@ -32,13 +32,28 @@
 # Cluster 5 exigiriam nova curadoria manual (a via automatica de descoberta
 # ampla continua bloqueada por robots.txt).
 #
-# NOTA TECNICA — o link do entregavel nunca e' o arquivo em si: e' uma pagina
-# HTML ("Documents download module", em ec.europa.eu) que redireciona por
+# NOTA TECNICA (HISTORICA, 2026-08-12) — o link do entregavel era uma pagina
+# HTML ("Documents download module", em ec.europa.eu) que redirecionava por
 # JAVASCRIPT (`window.location='...'`), nao por link nem HTTP 30x. Suportado
 # de forma generica em `engine/extract.py::_wrapper_de_download_js` (mesmo
-# mecanismo de `citation_pdf_url`, so' que o titulo vem da ANCORA que levou
-# ate' a pagina — o <title> do wrapper e' sempre o mesmo texto generico,
+# mecanismo de `citation_pdf_url`, so' que o titulo vinha da ANCORA que levava
+# ate' a pagina — o <title> do wrapper era sempre o mesmo texto generico,
 # ver `engine/crawler.py::_visitar`).
+#
+# ATUALIZACAO (2026-09-13) — o CORDIS trocou esse mecanismo: o link do
+# entregavel agora e' um `<a href>` DIRETO para o binario
+# (`ec.europa.eu/research/participants/documents/downloadPublic?documentIds=
+# ...&appId=PPGMS`), sem wrapper e sem extensao na URL. Confirmado ao vivo
+# que isso zerou a descoberta silenciosamente: `is_document_url()` so'
+# reconhece por extensao ou por `document_patterns` (abaixo, antes vazio para
+# esta fonte), entao o link virava `kind=page`, o crawler tentava parsear o
+# PDF como HTML, nao achava nada, e seguia sem erro nenhum — nenhum log, zero
+# documentos, para qualquer variante de lexico. `document_patterns` resolve
+# reconhecendo o link direto; o wrapper JS antigo, se ainda existir em algum
+# projeto nao migrado, continua coberto por `_wrapper_de_download_js` como
+# fallback — as duas vias nao se excluem.
+document_patterns:
+  - 'ec\.europa\.eu/research/participants/documents/downloadpublic'
 
 name: cordis
 kind: seeds
