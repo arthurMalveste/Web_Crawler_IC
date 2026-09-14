@@ -1,0 +1,19 @@
+{
+  "por_status": {
+    "discovered": 452
+  },
+  "por_faixa": {
+    "weak": 452
+  },
+  "por_fonte": {
+    "faa": 6,
+    "govuk": 4,
+    "ntrs": 269,
+    "rosap": 172,
+    "rosap_crawl": 1
+  },
+  "volume_gb": 0.0,
+  "conteudos_unicos": 0,
+  "conteudos_em_multiplas_fontes": 0,
+  "sobreposicao_por_par": {}
+}
