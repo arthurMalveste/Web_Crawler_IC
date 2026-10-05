@@ -306,6 +306,23 @@ class TestIdempotencia:
         pipeline.harvest()
         assert list(frontier.pending()) == []
 
+    @respx.mock
+    def test_so_pdf_pula_txt_e_deixa_pendente_quem_nao_tem_pdf(self, ambiente):
+        pipeline, frontier, _ = ambiente
+        txt = respx.get("https://ntrs.nasa.gov/1.txt").mock(
+            return_value=httpx.Response(200, text="texto")
+        )
+        respx.get("https://ntrs.nasa.gov/1.pdf").mock(return_value=httpx.Response(200, content=PDF))
+        com_pdf = make_rec("ntrs", "1", "https://ntrs.nasa.gov/1.txt")
+        com_pdf.candidate_urls.append("https://ntrs.nasa.gov/1.pdf")
+        sem_pdf = make_rec("ntrs", "2", "https://ntrs.nasa.gov/2.pptx")
+        pipeline.discover(FakeAdapter([com_pdf, sem_pdf]))
+
+        st = pipeline.harvest(so_pdf=True)
+
+        assert st.tentados == 1 and not txt.called
+        assert [r.source_id for r in frontier.pending()] == ["2"]
+
 
 class TestDeduplicacaoPorConteudo:
     @respx.mock

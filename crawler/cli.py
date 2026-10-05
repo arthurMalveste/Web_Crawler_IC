@@ -269,7 +269,9 @@ def cmd_harvest(args: argparse.Namespace) -> int:
     if args.tier:
         tiers = [{"strong": TIER_STRONG, "weak": TIER_WEAK}[t] for t in args.tier]
     with fetcher, frontier:
-        stats = pipeline.harvest(limit=args.limit, tiers=tiers, max_workers=args.workers)
+        stats = pipeline.harvest(
+            limit=args.limit, tiers=tiers, max_workers=args.workers, so_pdf=args.pdf
+        )
     print(json.dumps(stats.as_dict(), indent=2, ensure_ascii=False))
     return 0
 
@@ -455,6 +457,9 @@ def main(argv: list[str] | None = None) -> int:
         "--workers",
         type=int,
         help="threads simultaneas (padrao: soma da concorrencia configurada por dominio em domains.yaml)",
+    )
+    h.add_argument(
+        "--pdf", action="store_true", help="baixar so o PDF (ignora o .txt do NTRS e nao-PDFs)"
     )
     h.set_defaults(func=cmd_harvest)
 

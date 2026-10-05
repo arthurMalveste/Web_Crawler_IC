@@ -193,6 +193,7 @@ class Pipeline:
         tiers: list[str] | None = None,
         *,
         max_workers: int | None = None,
+        so_pdf: bool = False,
     ) -> HarvestStats:
         """Baixa o que a fila aprovou — em paralelo, um grupo de threads por
         dominio dentro do teto que `config/domains.yaml` ja declarava.
@@ -217,7 +218,20 @@ class Pipeline:
         st = HarvestStats()
         st_lock = threading.Lock()
 
-        pendentes = list(self.frontier.pending(limit=limit, tiers=tiers))
+        if so_pdf:
+            # Etapa 2 (Docling) parte do PDF original: descarta as outras URLs
+            # candidatas — inclusive o .txt do NTRS, que viria primeiro — e
+            # deixa pendente, intocado, quem nao tem PDF nenhum.
+            pendentes = []
+            for rec in self.frontier.pending(tiers=tiers):
+                rec.candidate_urls = [
+                    u for u in rec.candidate_urls if urlsplit(u).path.lower().endswith(".pdf")
+                ]
+                if rec.candidate_urls:
+                    pendentes.append(rec)
+            pendentes = pendentes[:limit] if limit else pendentes
+        else:
+            pendentes = list(self.frontier.pending(limit=limit, tiers=tiers))
         st.tentados = len(pendentes)
 
         n_workers = max_workers or self._worker_count(pendentes)
