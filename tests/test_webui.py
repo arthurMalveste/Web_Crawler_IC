@@ -11,6 +11,8 @@ o coletor em si — isso já é coberto pelos outros arquivos de teste.
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from crawler.core.frontier import STATUS_DISCOVERED, STATUS_STORED, Frontier
@@ -269,3 +271,31 @@ class TestRotasFlask:
 
         r = client.get("/api/harvest-preview")  # sem query string = sem filtro
         assert r.get_json() == {"total": 2, "por_fonte": {"ntrs": 1, "rosap": 1}}
+
+
+class TestEtapa3:
+    @staticmethod
+    def _doc(sha: str, source: str, faixa: str, nota_conops: float = 0.0) -> dict:
+        return {"sha256": sha, "source": source, "title": f"doc {sha}", "origem": "docling",
+                "palavras": 1000, "faixa": faixa, "nota_conops": nota_conops, "nota_dominio": 0.0,
+                "termos_conops": [], "secoes_canonicas": [], "termos_dominio": []}
+
+    def test_sem_filtro_rodado(self, isolado):
+        assert metrics.filtro_etapa3(isolado) == {"existe": False}
+
+    def test_conta_faixa_por_fonte_e_ordena_por_faixa(self, isolado):
+        docs = [self._doc("a", "ntrs", "nenhum"), self._doc("b", "ntrs", "ambos", 5.0),
+                self._doc("c", "rosap", "ambos", 50.0)]
+        (isolado / "filtro.jsonl").write_text("\n".join(json.dumps(d) for d in docs), encoding="utf-8")
+
+        r = metrics.filtro_etapa3(isolado)
+
+        assert r["contagem"]["ambos"] == {"ntrs": 1, "rosap": 1}
+        assert r["contagem"]["nenhum"] == {"ntrs": 1, "rosap": 0}
+        assert [d["sha256"] for d in r["documentos"]] == ["c", "b", "a"]
+        assert "limiar_conops" in r["parametros"]  # vem de config/lexicon.yaml
+
+    def test_rota_devolve_o_mesmo_resultado(self, isolado):
+        flask_app.testing = True
+        r = flask_app.test_client().get("/api/etapa3")
+        assert r.status_code == 200 and r.get_json() == {"existe": False}

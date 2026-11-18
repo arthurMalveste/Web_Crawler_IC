@@ -66,6 +66,22 @@ def api_harvest():
     return jsonify({"job_id": job_id})
 
 
+@app.get("/api/etapa3")
+def api_etapa3():
+    return jsonify(metrics.filtro_etapa3(metrics.data_root()))
+
+
+@app.post("/api/etapa3/rodar")
+def api_etapa3_rodar():
+    """Recalcula as faixas — ex.: depois de ajustar pesos/limiares em
+    config/lexicon.yaml (secao `etapa3`)."""
+    try:
+        metrics.rodar_filtro_etapa3()
+    except Exception as exc:  # erro do script vira mensagem no painel
+        return jsonify({"erro": f"filtro da Etapa 3 falhou: {exc}"}), 500
+    return jsonify(metrics.filtro_etapa3(metrics.data_root()))
+
+
 def main() -> None:
     # Só localhost: esta ferramenta dispara tráfego real contra servidores de
     # produção a partir de um clique — nunca deve ficar acessível na rede.

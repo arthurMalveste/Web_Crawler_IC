@@ -1,4 +1,4 @@
-<title>Painel do Coletor — ConOps Etapa 1</title>
+<title>Painel ConOps — Etapas 1 e 3</title>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
@@ -55,10 +55,22 @@
   .previa .total { font-size: .95rem; margin: 0 0 .5rem; }
   .previa .aviso { color: var(--err); font-size: .85rem; margin: 0 0 .5rem; }
   td.num, th.num { text-align: right; }
+  .faixas { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: .6rem; margin-bottom: 1rem; }
+  .faixa { border: 1px solid var(--border); border-radius: 8px; padding: .6rem .8rem; cursor: pointer; background: transparent; color: var(--fg); text-align: left; }
+  .faixa.ativa { outline: 2px solid var(--accent); }
+  .faixa .n { font-size: 1.5rem; font-weight: 700; display: block; }
+  .faixa .rotulo { font-size: .82rem; color: var(--muted); }
+  .faixa.ambos .n { color: var(--ok); }
+  .faixa.nenhum .n { color: var(--err); }
+  .termos { font-size: .78rem; color: var(--muted); }
+  .chip { display: inline-block; padding: 0 .4rem; margin: .1rem .15rem 0 0; border-radius: 4px; border: 1px solid var(--border); font-size: .75rem; color: var(--fg); }
+  .chip.c { border-color: var(--accent); }
+  .chip.s { border-color: var(--ok); }
+  .lista-etapa3 { max-height: 480px; overflow: auto; margin-top: .6rem; }
 </style>
 
 <main>
-  <h1>Painel do Coletor — ConOps Etapa 1</h1>
+  <h1>Painel ConOps — Etapas 1 e 3</h1>
   <p class="sub">Interface local sobre a CLI existente (<code>crawler.cli</code>). Não decide o que é ConOps — só descobre e coleta o que já tem indício.</p>
 
   <div id="erro" hidden></div>
@@ -89,6 +101,13 @@
       <button id="btn-harvest">Coletar pendentes</button>
     </div>
     <div class="previa" id="previa-harvest"></div>
+  </section>
+
+  <section id="etapa3">
+    <h2>Etapa 3 — Filtro por palavras-chave</h2>
+    <p class="sub" style="margin-bottom:.6rem">Duas notas por documento (termos de ConOps e termos do domínio aeronáutico/espacial) → 4 faixas. Não descarta nada nem julga o que é ConOps. Pesos e limiares: <code>config/lexicon.yaml</code>, seção <code>etapa3</code>.</p>
+    <div id="etapa3-conteudo"><p class="ocioso">Carregando…</p></div>
+    <div class="controles"><button id="btn-etapa3">Rodar filtro de novo</button><span class="termos" id="etapa3-info"></span></div>
   </section>
 
   <section>
@@ -232,6 +251,59 @@ async function atualizar() {
     document.querySelector('#btn-harvest').disabled = rodando;
   } catch (e) { mostrarErro(e.message); }
 }
+
+// ---------------------------------------------------------------- Etapa 3
+const ROTULOS = { ambos: 'Ambos (melhor caso)', so_conops: 'Só ConOps', so_dominio: 'Só domínio', nenhum: 'Nenhum (pior caso)' };
+let etapa3 = null;
+let faixaEscolhida = null;
+
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const chips = (lista, cls) => (lista || []).map(t => `<span class="chip ${cls}">${esc(t)}</span>`).join('');
+
+function renderEtapa3() {
+  const div = document.querySelector('#etapa3-conteudo');
+  if (!etapa3.existe) {
+    div.innerHTML = '<p class="ocioso">Filtro ainda não rodado — clique em "Rodar filtro de novo".</p>';
+    return;
+  }
+  const total = f => Object.values(etapa3.contagem[f]).reduce((a, b) => a + b, 0);
+  const cards = Object.keys(ROTULOS).map(f =>
+    `<button class="faixa ${f} ${faixaEscolhida === f ? 'ativa' : ''}" data-faixa="${f}"><span class="n">${total(f)}</span><span class="rotulo">${ROTULOS[f]}</span></button>`).join('');
+  const cab = etapa3.fontes.map(s => `<th class="num">${esc(s)}</th>`).join('');
+  const linhas = Object.keys(ROTULOS).map(f =>
+    `<tr><td>${ROTULOS[f]}</td>${etapa3.fontes.map(s => `<td class="num">${etapa3.contagem[f][s]}</td>`).join('')}</tr>`).join('');
+  const docs = etapa3.documentos.filter(d => !faixaEscolhida || d.faixa === faixaEscolhida);
+  const lista = docs.map(d => `<tr>
+      <td>${esc(d.title)}<div class="termos">${chips(d.termos_conops, 'c')}${chips(d.secoes_canonicas, 's')}${chips(d.termos_dominio, '')}</div></td>
+      <td>${esc(d.source)}</td><td>${ROTULOS[d.faixa]}</td>
+      <td class="num">${d.nota_conops}</td><td class="num">${d.nota_dominio}</td></tr>`).join('');
+  div.innerHTML = `<div class="faixas">${cards}</div>
+    <table><thead><tr><th>Faixa</th>${cab}</tr></thead><tbody>${linhas}</tbody></table>
+    <p class="termos" style="margin-top:.8rem">${faixaEscolhida ? `Mostrando: ${ROTULOS[faixaEscolhida]} (clique de novo no cartão para ver todos)` : 'Clique num cartão para filtrar a lista.'}
+      Etiquetas: <span class="chip c">termo ConOps</span><span class="chip s">seção canônica</span><span class="chip">termo do domínio</span></p>
+    <div class="lista-etapa3"><table><thead><tr><th>Documento</th><th>Fonte</th><th>Faixa</th><th class="num">Nota ConOps</th><th class="num">Nota domínio</th></tr></thead><tbody>${lista}</tbody></table></div>`;
+  div.querySelectorAll('.faixa').forEach(b => b.addEventListener('click', () => {
+    faixaEscolhida = faixaEscolhida === b.dataset.faixa ? null : b.dataset.faixa;
+    renderEtapa3();
+  }));
+  const p = etapa3.parametros;
+  document.querySelector('#etapa3-info').textContent =
+    `Gerado em ${new Date(etapa3.gerado_em).toLocaleString()} · limiar ConOps ${p.limiar_conops} · limiar domínio ${p.limiar_dominio} (mín. ${p.min_fortes_dominio} termos fortes)`;
+}
+
+async function carregarEtapa3(rodar = false) {
+  const btn = document.querySelector('#btn-etapa3');
+  btn.disabled = true;
+  esconderErro();
+  try {
+    etapa3 = await fetchJSON(rodar ? '/api/etapa3/rodar' : '/api/etapa3', rodar ? { method: 'POST' } : undefined);
+    renderEtapa3();
+  } catch (e) { mostrarErro(e.message); }
+  btn.disabled = false;
+}
+
+document.querySelector('#btn-etapa3').addEventListener('click', () => carregarEtapa3(true));
+carregarEtapa3();
 
 document.querySelector('#btn-discover').addEventListener('click', iniciarDiscover);
 document.querySelector('#btn-harvest').addEventListener('click', iniciarHarvest);

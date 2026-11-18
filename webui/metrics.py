@@ -14,9 +14,15 @@ nos mesmos arquivos, é seguro sem nenhum mecanismo novo de sincronização.
 
 from __future__ import annotations
 
+import json
 import sqlite3
+import subprocess
+import sys
+from datetime import datetime
 from pathlib import Path
 from typing import Any
+
+import yaml
 
 from crawler.core.fetcher import Config
 from crawler.core.frontier import STATUS_DISCOVERED, STATUS_STORED, Frontier
@@ -159,3 +165,38 @@ def _descrever(
         "pendentes": por_status.get(STATUS_DISCOVERED, 0),
         "armazenados": por_status.get(STATUS_STORED, 0),
     }
+
+
+# ------------------------------------------------------------ Etapa 3 (filtro)
+
+FAIXAS_ETAPA3 = ["ambos", "so_conops", "so_dominio", "nenhum"]
+
+
+def filtro_etapa3(root: Path) -> dict[str, Any]:
+    """Resultado de `etapa3/filtrar.py` (<corpus>/filtro.jsonl) para o painel:
+    contagem faixa x fonte, limiares em uso e a lista de documentos. So le o
+    arquivo — quem calcula as faixas e o script da Etapa 3."""
+    caminho = root / "filtro.jsonl"
+    if not caminho.exists():
+        return {"existe": False}
+    docs = [json.loads(l) for l in caminho.read_text(encoding="utf-8").splitlines() if l.strip()]
+    fontes = sorted({d["source"] for d in docs})
+    contagem = {f: {s: 0 for s in fontes} for f in FAIXAS_ETAPA3}
+    for d in docs:
+        contagem[d["faixa"]][d["source"]] += 1
+    lexico = yaml.safe_load((CONFIG_DIR / "lexicon.yaml").read_text(encoding="utf-8"))
+    return {
+        "existe": True,
+        "gerado_em": datetime.fromtimestamp(caminho.stat().st_mtime).isoformat(timespec="seconds"),
+        "parametros": lexico.get("etapa3", {}),
+        "fontes": fontes,
+        "contagem": contagem,
+        "documentos": sorted(docs, key=lambda d: (FAIXAS_ETAPA3.index(d["faixa"]), -d["nota_conops"])),
+    }
+
+
+def rodar_filtro_etapa3() -> None:
+    """Roda `etapa3/filtrar.py` e espera: sao segundos, sem rede — nao precisa
+    do esquema de jobs em segundo plano do discover/harvest."""
+    subprocess.run([sys.executable, str(ROOT / "etapa3" / "filtrar.py")], check=True,
+                   capture_output=True, cwd=ROOT)
