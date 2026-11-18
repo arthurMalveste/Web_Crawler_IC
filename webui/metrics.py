@@ -15,6 +15,7 @@ nos mesmos arquivos, é seguro sem nenhum mecanismo novo de sincronização.
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 import subprocess
 import sys
@@ -200,3 +201,22 @@ def rodar_filtro_etapa3() -> None:
     do esquema de jobs em segundo plano do discover/harvest."""
     subprocess.run([sys.executable, str(ROOT / "etapa3" / "filtrar.py")], check=True,
                    capture_output=True, cwd=ROOT)
+
+
+def arquivo_documento(root: Path, sha: str) -> tuple[Path, str] | None:
+    """Arquivo armazenado de um documento (PDF, ou o .txt do NTRS) para o botao
+    "ver documento" do painel. Aceita so um sha256 que esteja na fila como
+    armazenado — o caminho vem do banco, nunca da requisicao."""
+    if not re.fullmatch(r"[0-9a-f]{64}", sha):
+        return None
+    with sqlite3.connect(root / "frontier.sqlite") as con:
+        linha = con.execute(
+            "SELECT stored_path, content_kind FROM documents WHERE sha256 = ? AND status = ?",
+            (sha, STATUS_STORED),
+        ).fetchone()
+    if not linha or not linha[0]:
+        return None
+    caminho = (root / linha[0]).resolve()
+    if root.resolve() not in caminho.parents or not caminho.exists():
+        return None
+    return caminho, "application/pdf" if linha[1] == "pdf" else "text/plain"

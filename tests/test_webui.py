@@ -299,3 +299,29 @@ class TestEtapa3:
         flask_app.testing = True
         r = flask_app.test_client().get("/api/etapa3")
         assert r.status_code == 200 and r.get_json() == {"existe": False}
+
+    def _armazenado(self, root, sha: str, rel: str, kind: str = "pdf"):
+        rec = _rec("faa", "1")
+        with Frontier(root / "frontier.sqlite") as f:
+            f.add(rec, status=STATUS_DISCOVERED)
+            f.mark(rec.key, STATUS_STORED, sha256=sha, stored_path=rel, content_kind=kind)
+
+    def test_olho_serve_o_pdf_armazenado(self, isolado):
+        sha = "a" * 64
+        (isolado / "raw").mkdir()
+        (isolado / "raw" / f"{sha}.pdf").write_bytes(b"%PDF-1.4 teste")
+        self._armazenado(isolado, sha, f"raw/{sha}.pdf")
+
+        flask_app.testing = True
+        r = flask_app.test_client().get(f"/documento/{sha}")
+        assert r.status_code == 200 and r.mimetype == "application/pdf"
+        assert r.data.startswith(b"%PDF")
+
+    def test_olho_recusa_sha_invalido_e_caminho_fora_do_corpus(self, isolado):
+        sha = "b" * 64
+        self._armazenado(isolado, sha, "../fora.pdf")
+        (isolado.parent / "fora.pdf").write_bytes(b"%PDF")
+        assert metrics.arquivo_documento(isolado, sha) is None
+        assert metrics.arquivo_documento(isolado, "../../etc/passwd") is None
+        flask_app.testing = True
+        assert flask_app.test_client().get("/documento/naoexiste").status_code == 404

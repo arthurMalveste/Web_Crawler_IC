@@ -66,7 +66,14 @@
   .chip { display: inline-block; padding: 0 .4rem; margin: .1rem .15rem 0 0; border-radius: 4px; border: 1px solid var(--border); font-size: .75rem; color: var(--fg); }
   .chip.c { border-color: var(--accent); }
   .chip.s { border-color: var(--ok); }
-  .lista-etapa3 { max-height: 480px; overflow: auto; margin-top: .6rem; }
+  select { padding: .3rem .5rem; border: 1px solid var(--border); border-radius: 6px; background: var(--card); color: var(--fg); }
+  .lista-etapa3 { max-height: 480px; overflow: auto; margin: .6rem 0 0; padding: 0; list-style: none; }
+  .doc { display: flex; align-items: flex-start; gap: .5rem; padding: .45rem .2rem; border-bottom: 1px solid var(--border); font-size: .9rem; }
+  .doc details { flex: 1; min-width: 0; }
+  .doc summary { cursor: pointer; }
+  .doc .termos { padding: .35rem 0 0 1.1rem; }
+  .doc .ver { color: var(--muted); padding: .1rem .3rem; border-radius: 6px; line-height: 0; }
+  .doc .ver:hover { color: var(--accent); background: var(--bg); }
 </style>
 
 <main>
@@ -253,9 +260,11 @@ async function atualizar() {
 }
 
 // ---------------------------------------------------------------- Etapa 3
-const ROTULOS = { ambos: 'Ambos (melhor caso)', so_conops: 'Só ConOps', so_dominio: 'Só domínio', nenhum: 'Nenhum (pior caso)' };
+const ROTULOS = { ambos: 'Ambos', so_conops: 'ConOps', so_dominio: 'Domínio', nenhum: 'Nenhum' };
 let etapa3 = null;
+const OLHO = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>';
 let faixaEscolhida = null;
+let fonteEscolhida = '';
 
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const chips = (lista, cls) => (lista || []).map(t => `<span class="chip ${cls}">${esc(t)}</span>`).join('');
@@ -266,22 +275,28 @@ function renderEtapa3() {
     div.innerHTML = '<p class="ocioso">Filtro ainda não rodado — clique em "Rodar filtro de novo".</p>';
     return;
   }
-  const total = f => Object.values(etapa3.contagem[f]).reduce((a, b) => a + b, 0);
+  // com uma fonte escolhida, os cartoes contam so os documentos dela
+  const total = f => fonteEscolhida ? etapa3.contagem[f][fonteEscolhida] : Object.values(etapa3.contagem[f]).reduce((a, b) => a + b, 0);
   const cards = Object.keys(ROTULOS).map(f =>
     `<button class="faixa ${f} ${faixaEscolhida === f ? 'ativa' : ''}" data-faixa="${f}"><span class="n">${total(f)}</span><span class="rotulo">${ROTULOS[f]}</span></button>`).join('');
   const cab = etapa3.fontes.map(s => `<th class="num">${esc(s)}</th>`).join('');
   const linhas = Object.keys(ROTULOS).map(f =>
     `<tr><td>${ROTULOS[f]}</td>${etapa3.fontes.map(s => `<td class="num">${etapa3.contagem[f][s]}</td>`).join('')}</tr>`).join('');
-  const docs = etapa3.documentos.filter(d => !faixaEscolhida || d.faixa === faixaEscolhida);
-  const lista = docs.map(d => `<tr>
-      <td>${esc(d.title)}<div class="termos">${chips(d.termos_conops, 'c')}${chips(d.secoes_canonicas, 's')}${chips(d.termos_dominio, '')}</div></td>
-      <td>${esc(d.source)}</td><td>${ROTULOS[d.faixa]}</td>
-      <td class="num">${d.nota_conops}</td><td class="num">${d.nota_dominio}</td></tr>`).join('');
+  const docs = etapa3.documentos.filter(d => (!faixaEscolhida || d.faixa === faixaEscolhida) && (!fonteEscolhida || d.source === fonteEscolhida));
+  const opcoes = ['', ...etapa3.fontes].map(s => `<option value="${esc(s)}" ${s === fonteEscolhida ? 'selected' : ''}>${s ? esc(s) : 'Todas as fontes'}</option>`).join('');
+  const lista = docs.map(d => `<li class="doc">
+      <details><summary>${esc(d.title)}</summary>
+        <div class="termos">${chips(d.termos_conops, 'c')}${chips(d.secoes_canonicas, 's')}${chips(d.termos_dominio, '')}
+          <div>${esc(d.source)} · ${ROTULOS[d.faixa]} · nota ConOps ${d.nota_conops} · nota domínio ${d.nota_dominio}</div></div>
+      </details>
+      <a class="ver" href="/documento/${d.sha256}" target="_blank" rel="noopener" title="Ver documento">${OLHO}</a></li>`).join('');
   div.innerHTML = `<div class="faixas">${cards}</div>
     <table><thead><tr><th>Faixa</th>${cab}</tr></thead><tbody>${linhas}</tbody></table>
-    <p class="termos" style="margin-top:.8rem">${faixaEscolhida ? `Mostrando: ${ROTULOS[faixaEscolhida]} (clique de novo no cartão para ver todos)` : 'Clique num cartão para filtrar a lista.'}
+    <div class="controles"><label class="inline">Fonte <select id="etapa3-fonte">${opcoes}</select></label><span class="termos">${docs.length} documento(s)</span></div>
+    <p class="termos" style="margin-top:.6rem">${faixaEscolhida ? `Faixa: ${ROTULOS[faixaEscolhida]} (clique de novo no cartão para ver todas)` : 'Clique num cartão para filtrar por faixa.'}
       Etiquetas: <span class="chip c">termo ConOps</span><span class="chip s">seção canônica</span><span class="chip">termo do domínio</span></p>
-    <div class="lista-etapa3"><table><thead><tr><th>Documento</th><th>Fonte</th><th>Faixa</th><th class="num">Nota ConOps</th><th class="num">Nota domínio</th></tr></thead><tbody>${lista}</tbody></table></div>`;
+    <ul class="lista-etapa3">${lista}</ul>`;
+  div.querySelector('#etapa3-fonte').addEventListener('change', e => { fonteEscolhida = e.target.value; renderEtapa3(); });
   div.querySelectorAll('.faixa').forEach(b => b.addEventListener('click', () => {
     faixaEscolhida = faixaEscolhida === b.dataset.faixa ? null : b.dataset.faixa;
     renderEtapa3();

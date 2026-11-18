@@ -12,7 +12,7 @@ Rodar: `python -m webui.app` (ver webui/README.md).
 
 from __future__ import annotations
 
-from flask import Flask, jsonify, request, send_from_directory
+from flask import Flask, abort, jsonify, request, send_file, send_from_directory
 
 from . import jobs, metrics
 
@@ -80,6 +80,16 @@ def api_etapa3_rodar():
     except Exception as exc:  # erro do script vira mensagem no painel
         return jsonify({"erro": f"filtro da Etapa 3 falhou: {exc}"}), 500
     return jsonify(metrics.filtro_etapa3(metrics.data_root()))
+
+
+@app.get("/documento/<sha>")
+def documento(sha: str):
+    """Abre o arquivo do corpus numa guia nova (botao do olho na Etapa 3)."""
+    achado = metrics.arquivo_documento(metrics.data_root(), sha)
+    if achado is None:
+        abort(404)
+    caminho, tipo = achado
+    return send_file(caminho, mimetype=tipo)
 
 
 def main() -> None:
