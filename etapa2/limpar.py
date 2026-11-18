@@ -47,9 +47,12 @@ def palavras(texto: str) -> int:
 
 
 def legivel(texto: str) -> bool:
-    """Mesmo criterio de extrair.py: palavras por 1000 caracteres de conteudo."""
+    """Mesmo criterio de extrair.py: palavras por 1000 caracteres de conteudo.
+    Menos de 50 palavras nao e texto: o .txt do NTRS as vezes traz so o nome
+    do arquivo (ex.: 20240011450)."""
     conteudo = len(re.sub(r"[\s|\-]", "", texto))
-    return palavras(texto) * 1000 / max(conteudo, 1) >= 30
+    n = palavras(texto)
+    return n >= 50 and n * 1000 / max(conteudo, 1) >= 30
 
 
 def main() -> None:

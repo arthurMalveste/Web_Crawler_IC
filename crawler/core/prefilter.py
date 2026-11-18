@@ -73,7 +73,6 @@ class Lexicon:
         self.moderate = [normalize(t) for t in cfg.get("moderate_terms", [])]
         self.structural = [normalize(t) for t in cfg.get("structural_signature", [])]
         self.adversarial = [normalize(t) for t in cfg.get("adversarial_markers", [])]
-        self.safety = [normalize(t) for t in cfg.get("safety_terms", [])]
 
         s = cfg.get("scoring", {})
         self.w_strong_title = s.get("weight_strong_title", 10.0)

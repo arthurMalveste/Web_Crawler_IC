@@ -109,24 +109,76 @@ adversarial_markers:
   - training syllabus
   - course outline
 
-# --- VOCABULARIO DE SAFETY / STPA -------------------------------------------
-# Nao indica ConOps. Reservado para alimentar o dicionario da Etapa 3 — nao
-# consumido por nenhum codigo desta etapa hoje (o uso anterior, identificar
-# hard negatives do acervo PSAS, foi removido em 2026-08-06).
-safety_terms:
-  - stpa
-  - stamp
-  - system theoretic process analysis
-  - systems theoretic accident model
-  - hazard analysis
-  - safety control structure
-  - unsafe control action
-  - loss scenario
-  - functional hazard assessment
-  - fault tree
-  - fmea
-  - safety case
-  - system safety
+# --- VOCABULARIO DO DOMINIO (Etapa 3) ----------------------------------------
+# Nao indica ConOps: indica que o documento e do dominio do projeto —
+# aeronautica + espacial, incluindo seguranca de sistemas / STPA (decisao de
+# 2026-11-18). A Etapa 3 cruza este sinal com o de ConOps (termos acima) em
+# 4 faixas: ambos, so ConOps, so dominio, nenhum. Nao usado pela Etapa 1.
+domain_terms:
+  # Especificos do dominio: raramente aparecem fora dele.
+  strong:
+    # seguranca de sistemas / STPA (antigo `safety_terms`)
+    - stpa
+    - stamp
+    - system theoretic process analysis
+    - systems theoretic accident model
+    - hazard analysis
+    - safety control structure
+    - unsafe control action
+    - loss scenario
+    - functional hazard assessment
+    - fault tree
+    - fmea
+    - safety case
+    - system safety
+    # aeronautica
+    - aircraft
+    - airspace
+    - air traffic
+    - air traffic management
+    - air traffic control
+    - avionics
+    - flight deck
+    - cockpit
+    - airport
+    - runway
+    - rotorcraft
+    - unmanned aircraft
+    - uas
+    - drone
+    - nextgen
+    # espacial
+    - spacecraft
+    - launch vehicle
+    - space station
+    - extravehicular activity
+    - lunar
+    - orbital
+    - mars
+    - moon
+    - astronaut
+    - spaceflight
+    - international space station
+    - deep space
+    - artemis
+  # Ambiguos: tambem aparecem fora do dominio (ex.: "pilot program" em
+  # relatorios de transporte terrestre). Pesam menos.
+  moderate:
+    - flight
+    - pilot
+    - airline
+    - navigation
+    - mission
+    - crew
+    - payload
+    - ground segment
+    - telemetry
+    - orbit
+    - satellite  # ambiguo: "salt satellite facilities", GPS no ROSAP
+    - hazard
+    - safety
+    - failure
+    - risk
 
 # --- PESOS E LIMIARES --------------------------------------------------------
 scoring:
@@ -143,3 +195,23 @@ thresholds:
   strong_min_score: 10.0
   # weak: qualquer sinal relevante fora do titulo, ou strong rebaixado.
   weak_min_score: 2.5
+
+# --- ETAPA 3: FILTRO SOBRE O TEXTO COMPLETO ----------------------------------
+# Duas notas independentes por documento (ConOps e dominio), cada uma com seu
+# limiar -> 4 faixas: ambos, so_conops, so_dominio, nenhum (etapa3/filtrar.py).
+# Termos contam por ocorrencia e sao normalizados por 10 mil palavras, para um
+# relatorio de 300 paginas nao vencer so pelo tamanho. As secoes canonicas
+# (structural_signature) contam por secao distinta achada como TITULO.
+# Valores iniciais — a calibrar olhando a distribuicao das faixas.
+etapa3:
+  peso_forte: 3.0
+  peso_moderado: 1.0
+  peso_estrutural: 4.0
+  # termo forte de ConOps no TITULO: um ConOps longo dilui a nota por tamanho
+  # (ex.: "CLD Concept of Operations" da NASA ficou em 9,7 sem isto)
+  peso_titulo_conops: 10.0
+  limiar_conops: 10.0
+  limiar_dominio: 20.0
+  # dominio exige termos ESPECIFICOS: so moderados (safety, risk, failure...)
+  # punham relatorios de seguranca viaria na faixa de dominio
+  min_fortes_dominio: 3
