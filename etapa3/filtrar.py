@@ -5,7 +5,9 @@ duas notas independentes, com os termos de config/lexicon.yaml:
 
 - ConOps: strong_terms, moderate_terms e as secoes canonicas
   (structural_signature) encontradas como titulo de secao;
-- dominio: domain_terms (aeronautica + espacial + seguranca/STPA).
+- dominio: termos dos dominios ATIVOS em `etapa3.dominios` (hoje seguranca/
+  STPA, aeronautica e espacial) — configuracao propria da Etapa 3,
+  independente da do download (`download.dominios`).
 
 Cada nota tem seu limiar -> faixa: ambos, so_conops, so_dominio, nenhum.
 Nao descarta nada e nao julga se o documento e um ConOps (isso e a Etapa 5):
@@ -25,7 +27,7 @@ import yaml
 
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO))
-from crawler.core.prefilter import normalize  # mesma normalizacao da Etapa 1
+from crawler.core.prefilter import normalize, termos_dos_dominios  # mesma normalizacao da Etapa 1
 
 CORPUS = (REPO / os.environ.get("CONOPS_DATA_ROOT", "../ConOpsCorpus")).resolve()
 FAIXAS = ["ambos", "so_conops", "so_dominio", "nenhum"]
@@ -61,7 +63,7 @@ def main() -> None:
     cfg = lx["etapa3"]
     norm = lambda chave, d=lx: [normalize(t) for t in d[chave]]
     c_forte, c_mod, assinatura = norm("strong_terms"), norm("moderate_terms"), norm("structural_signature")
-    d_forte, d_mod = norm("strong", lx["domain_terms"]), norm("moderate", lx["domain_terms"])
+    d_forte, d_mod = termos_dos_dominios(cfg["dominios"])
 
     indice = [json.loads(l) for l in (CORPUS / "texto" / "indice.jsonl").read_text(encoding="utf-8").splitlines()]
     saida = []

@@ -44,6 +44,26 @@ def _pad(text: str) -> str:
     return f" {text} "
 
 
+def termos_dos_dominios(dominios: dict[str, Any]) -> tuple[list[str], list[str]]:
+    """(fortes, moderados) normalizados dos dominios ATIVOS de uma configuracao
+    de dominio do lexico (`download.dominios` ou `etapa3.dominios`).
+
+    Os dominios ativos se somam numa nota so; um termo repetido em dois
+    dominios conta uma vez. A ordem segue a do YAML (dominio, depois termo).
+    """
+    fortes: list[str] = []
+    moderados: list[str] = []
+    for dom in (dominios or {}).values():
+        if not dom.get("ativo", True):
+            continue
+        for destino, chave in ((fortes, "fortes"), (moderados, "moderados")):
+            for termo in dom.get(chave) or []:
+                t = normalize(termo)
+                if t and t not in destino:
+                    destino.append(t)
+    return fortes, moderados
+
+
 @dataclass
 class ScoreBreakdown:
     """Resultado detalhado — vai para o manifesto e sustenta a auditoria."""
@@ -73,6 +93,9 @@ class Lexicon:
         self.moderate = [normalize(t) for t in cfg.get("moderate_terms", [])]
         self.structural = [normalize(t) for t in cfg.get("structural_signature", [])]
         self.adversarial = [normalize(t) for t in cfg.get("adversarial_markers", [])]
+        # Consulta das fontes de API (discover): sem normalizar — vai como texto
+        # de busca para a API, que tem a sua propria analise de texto.
+        self.search_terms = list(cfg.get("search_terms", []))
 
         s = cfg.get("scoring", {})
         self.w_strong_title = s.get("weight_strong_title", 10.0)

@@ -36,6 +36,22 @@ strong_terms:
   - concept of use
   - conuse
 
+# --- TERMOS DE BUSCA (discover) ----------------------------------------------
+# Consulta enviada as fontes de API que aceitam busca textual (NTRS, CORE,
+# GOV.UK). Subconjunto de `strong_terms`, menor de proposito: cada termo custa
+# uma rodada de chamadas a API (no CORE, 15-60 s por chamada). O ROSA-P (lista
+# o repositorio inteiro via OAI-PMH) e as fontes de crawl (seeds) nao usam.
+# A descoberta e so por ConOps — dominio nunca entra aqui (decisao de 2026-11-19).
+# `--terms` na linha de comando substitui esta lista numa execucao.
+search_terms:
+  - concept of operations
+  - conops
+  - operational concept
+  - operations concept
+  - operating concept
+  - concept of employment
+  - mission operations concept
+
 # Sinal moderado: sugerem conteudo de concepcao sem nomear o artefato.
 # Nunca elevam sozinhos para `strong`; somam pontos para `weak`.
 moderate_terms:
@@ -109,77 +125,6 @@ adversarial_markers:
   - training syllabus
   - course outline
 
-# --- VOCABULARIO DO DOMINIO (Etapa 3) ----------------------------------------
-# Nao indica ConOps: indica que o documento e do dominio do projeto —
-# aeronautica + espacial, incluindo seguranca de sistemas / STPA (decisao de
-# 2026-11-18). A Etapa 3 cruza este sinal com o de ConOps (termos acima) em
-# 4 faixas: ambos, so ConOps, so dominio, nenhum. Nao usado pela Etapa 1.
-domain_terms:
-  # Especificos do dominio: raramente aparecem fora dele.
-  strong:
-    # seguranca de sistemas / STPA (antigo `safety_terms`)
-    - stpa
-    - stamp
-    - system theoretic process analysis
-    - systems theoretic accident model
-    - hazard analysis
-    - safety control structure
-    - unsafe control action
-    - loss scenario
-    - functional hazard assessment
-    - fault tree
-    - fmea
-    - safety case
-    - system safety
-    # aeronautica
-    - aircraft
-    - airspace
-    - air traffic
-    - air traffic management
-    - air traffic control
-    - avionics
-    - flight deck
-    - cockpit
-    - airport
-    - runway
-    - rotorcraft
-    - unmanned aircraft
-    - uas
-    - drone
-    - nextgen
-    # espacial
-    - spacecraft
-    - launch vehicle
-    - space station
-    - extravehicular activity
-    - lunar
-    - orbital
-    - mars
-    - moon
-    - astronaut
-    - spaceflight
-    - international space station
-    - deep space
-    - artemis
-  # Ambiguos: tambem aparecem fora do dominio (ex.: "pilot program" em
-  # relatorios de transporte terrestre). Pesam menos.
-  moderate:
-    - flight
-    - pilot
-    - airline
-    - navigation
-    - mission
-    - crew
-    - payload
-    - ground segment
-    - telemetry
-    - orbit
-    - satellite  # ambiguo: "salt satellite facilities", GPS no ROSAP
-    - hazard
-    - safety
-    - failure
-    - risk
-
 # --- PESOS E LIMIARES --------------------------------------------------------
 scoring:
   weight_strong_title: 10.0
@@ -196,9 +141,118 @@ thresholds:
   # weak: qualquer sinal relevante fora do titulo, ou strong rebaixado.
   weak_min_score: 2.5
 
+# --- DOMINIO: DUAS CONFIGURACOES INDEPENDENTES -------------------------------
+# Termos de dominio NAO indicam ConOps: indicam que o documento e do dominio que
+# o usuario procura. Decisao de 2026-11-19/20 (reuniao com a orientadora):
+#   - a descoberta (discover) e so por ConOps — dominio nunca entra nela;
+#   - o dominio entra em dois lugares, cada um com a SUA configuracao, editavel
+#     separadamente no painel: `download` (decidir se vale baixar um candidato
+#     ja encontrado) e `etapa3` (filtragem sobre o texto completo).
+# As duas comecam com os mesmos dominios e termos, mas sao copias
+# independentes de proposito: no download so ha titulo/resumo/assuntos, na
+# Etapa 3 ha o texto inteiro — termos e pesos bons num nem sempre servem no
+# outro.
+#
+# Cada dominio: `nome` (exibido no painel), `ativo` (entra ou nao na nota),
+# `fortes` (especificos, raramente aparecem fora do dominio) e `moderados`
+# (ambiguos, pesam menos). Os termos dos dominios ativos se somam numa nota so.
+# STPA nao e exigido: e um dominio que soma pontos — aparece em poucos ConOps
+# (11 dos 1.107 candidatos pelos metadados; 35 dos 306 textos completos).
+
+# --- DOWNLOAD: FILTRO DE DOMINIO ANTES DE BAIXAR -----------------------------
+# Desligado por padrao = baixa todo candidato com indicio de ConOps, sem olhar
+# dominio (comportamento original da Etapa 1). Ligado, o candidato que nao
+# atinge `limiar_dominio` nos metadados (titulo + resumo + assuntos) fica
+# marcado como fora do dominio — nao e apagado: volta para a fila se a
+# configuracao mudar, sem precisar descobrir de novo.
+# Metadados sao curtos, entao a nota NAO e normalizada por tamanho: soma
+# simples de `peso_forte` por termo forte e `peso_moderado` por moderado.
+# Valores iniciais (1 termo forte ou 3 moderados) — a calibrar com a previa
+# do painel. Aplicado a partir da fase 1 do plano do painel de palavras-chave.
+download:
+  filtrar_por_dominio: false
+  peso_forte: 3.0
+  peso_moderado: 1.0
+  limiar_dominio: 3.0
+  dominios:
+    seguranca_stpa:
+      nome: Segurança de sistemas / STPA
+      ativo: true
+      fortes:
+        - stpa
+        - stamp
+        - system theoretic process analysis
+        - systems theoretic accident model
+        - hazard analysis
+        - safety control structure
+        - unsafe control action
+        - loss scenario
+        - functional hazard assessment
+        - fault tree
+        - fmea
+        - safety case
+        - system safety
+      moderados:
+        - hazard
+        - safety
+        - failure
+        - risk
+    aeronautica:
+      nome: Aeronáutica
+      ativo: true
+      fortes:
+        - aircraft
+        - airspace
+        - air traffic
+        - air traffic management
+        - air traffic control
+        - avionics
+        - flight deck
+        - cockpit
+        - airport
+        - runway
+        - rotorcraft
+        - unmanned aircraft
+        - uas
+        - drone
+        - nextgen
+      moderados:
+        # ambiguo: "pilot program" em relatorios de transporte terrestre
+        - flight
+        - pilot
+        - airline
+        - navigation
+    espacial:
+      nome: Espacial
+      ativo: true
+      fortes:
+        - spacecraft
+        - launch vehicle
+        - space station
+        - extravehicular activity
+        - lunar
+        - orbital
+        - mars
+        - moon
+        - astronaut
+        - spaceflight
+        - international space station
+        - deep space
+        - artemis
+      moderados:
+        - mission
+        - crew
+        - payload
+        - ground segment
+        - telemetry
+        - orbit
+        - satellite  # ambiguo: "salt satellite facilities", GPS no ROSAP
+
 # --- ETAPA 3: FILTRO SOBRE O TEXTO COMPLETO ----------------------------------
 # Duas notas independentes por documento (ConOps e dominio), cada uma com seu
 # limiar -> 4 faixas: ambos, so_conops, so_dominio, nenhum (etapa3/filtrar.py).
+# A nota de ConOps usa strong_terms/moderate_terms/structural_signature (os
+# mesmos da Etapa 1); a de dominio usa os dominios ativos abaixo.
 # Termos contam por ocorrencia e sao normalizados por 10 mil palavras, para um
 # relatorio de 300 paginas nao vencer so pelo tamanho. As secoes canonicas
 # (structural_signature) contam por secao distinta achada como TITULO.
@@ -215,3 +269,76 @@ etapa3:
   # dominio exige termos ESPECIFICOS: so moderados (safety, risk, failure...)
   # punham relatorios de seguranca viaria na faixa de dominio
   min_fortes_dominio: 3
+  dominios:
+    seguranca_stpa:
+      nome: Segurança de sistemas / STPA
+      ativo: true
+      fortes:
+        - stpa
+        - stamp
+        - system theoretic process analysis
+        - systems theoretic accident model
+        - hazard analysis
+        - safety control structure
+        - unsafe control action
+        - loss scenario
+        - functional hazard assessment
+        - fault tree
+        - fmea
+        - safety case
+        - system safety
+      moderados:
+        - hazard
+        - safety
+        - failure
+        - risk
+    aeronautica:
+      nome: Aeronáutica
+      ativo: true
+      fortes:
+        - aircraft
+        - airspace
+        - air traffic
+        - air traffic management
+        - air traffic control
+        - avionics
+        - flight deck
+        - cockpit
+        - airport
+        - runway
+        - rotorcraft
+        - unmanned aircraft
+        - uas
+        - drone
+        - nextgen
+      moderados:
+        # ambiguo: "pilot program" em relatorios de transporte terrestre
+        - flight
+        - pilot
+        - airline
+        - navigation
+    espacial:
+      nome: Espacial
+      ativo: true
+      fortes:
+        - spacecraft
+        - launch vehicle
+        - space station
+        - extravehicular activity
+        - lunar
+        - orbital
+        - mars
+        - moon
+        - astronaut
+        - spaceflight
+        - international space station
+        - deep space
+        - artemis
+      moderados:
+        - mission
+        - crew
+        - payload
+        - ground segment
+        - telemetry
+        - orbit
+        - satellite  # ambiguo: "salt satellite facilities", GPS no ROSAP

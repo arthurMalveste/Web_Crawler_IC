@@ -449,7 +449,7 @@ busca por termo, sem precisar de curadoria manual tipo CORDIS.
 O MOD britânico nomeia esse tipo de documento **"Operating Concept"** — frase que não estava
 em `config/lexicon.yaml` (só havia "operational concept"/"operations concept"). Sem o termo,
 títulos como "Air Operating Concept (AirOpC)" não pontuavam `strong`. Adicionado a
-`strong_terms` (e a `TERMOS_LEXICO_FORTE` em `cli.py`, a lista usada como consulta pelas três
+`strong_terms` (e a `TERMOS_LEXICO_FORTE` em `cli.py` — desde 2026-11-20 `search_terms` em `config/lexicon.yaml` —, a lista usada como consulta pelas três
 fontes de busca textual) — achado válido independente desta fonte, mas encontrado por causa
 dela.
 

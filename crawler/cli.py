@@ -44,18 +44,6 @@ ROOT = Path(__file__).resolve().parent.parent
 CONFIG_DIR = ROOT / "config"
 SOURCES_DIR = CONFIG_DIR / "sources"
 
-#: Termos de sinal forte do lexico, usados como consulta pelas fontes de API
-#: que aceitam busca textual (NTRS, CORE, GOV.UK) — e o mesmo vocabulario que
-#: decide a faixa, entao consulta e filtro nao divergem.
-TERMOS_LEXICO_FORTE = [
-    "concept of operations",
-    "conops",
-    "operational concept",
-    "operations concept",
-    "operating concept",
-    "concept of employment",
-    "mission operations concept",
-]
 
 
 def setup_logging(verbose: bool = False) -> None:
@@ -109,7 +97,7 @@ def build(args: argparse.Namespace):
 
 def make_adapter(name: str, fetcher, lexicon: Lexicon, args: argparse.Namespace):
     if name == "ntrs":
-        terms = args.terms or TERMOS_LEXICO_FORTE
+        terms = args.terms or lexicon.search_terms
         return NTRSAdapter(
             fetcher,
             terms=terms,
@@ -124,14 +112,14 @@ def make_adapter(name: str, fetcher, lexicon: Lexicon, args: argparse.Namespace)
             max_pages=args.max_pages,
         )
     if name == "core":
-        terms = args.terms or TERMOS_LEXICO_FORTE
+        terms = args.terms or lexicon.search_terms
         # Chave fora do YAML de proposito (nao pode ser versionada) — vem do
         # `.env` via `os.environ`, ja carregado a esta altura porque `build()`
         # sempre constroi `Config` primeiro (ver `core/env.py::carregar_dotenv`).
         api_key = os.environ.get("CORE_API_KEY", "")
         return COREAdapter(fetcher, api_key=api_key, terms=terms)
     if name == "govuk":
-        terms = args.terms or TERMOS_LEXICO_FORTE
+        terms = args.terms or lexicon.search_terms
         return GovUKAdapter(fetcher, terms=terms)
 
     # Qualquer outra fonte e resolvida por SourceSpec — adicionar um
